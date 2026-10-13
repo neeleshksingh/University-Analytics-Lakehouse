@@ -21,3 +21,7 @@ Rule of thumb: services in Docker, code you’re actively writing runs natively.
 # Experiment
 
 - I defined the schema once in SQLAlchemy, so the same code creates it in PostgreSQL locally and Azure SQL in the cloud. SQLAlchemy translates types like Boolean into BOOLEAN or BIT for each database.
+
+# why is program_course unique on program_id + course_id, and not on course_id alone?
+
+- A course can belong to many programs, so course_id alone isn’t unique. But the same course shouldn’t be added twice to the same program, so the combination program_id + course_id is unique. That’s a composite unique constraint on a many-to-many bridge table: program_course connects programs and courses.
