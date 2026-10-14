@@ -1,2 +1,66 @@
-.venv
+# ===== Python =====
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# ===== Secrets and local settings (never commit) =====
 .env
+.env.*
+# keep the template: it has no real secrets
+!.env.example
+
+# ===== Local data: generated and rebuildable =====
+lake/
+data/
+exports/
+*.parquet
+*.csv
+# allow small reference CSVs inside docs/
+!docs/**/*.csv
+
+# ===== Spark and Delta Lake =====
+spark-warehouse/
+metastore_db/
+derby.log
+checkpoint/
+_checkpoint/
+*.crc
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== Terraform =====
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+# commit .terraform.lock.hcl: it pins provider versions
+
+# ===== Databricks and Azure =====
+.databricks/
+.databrickscfg
+.azure/
+
+# ===== Power BI =====
+*.pbix
+
+# ===== Editors and OS =====
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.log

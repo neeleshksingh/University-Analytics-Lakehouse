@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    MetaData, Table, Column,
+    BigInteger, MetaData, Table, Column,
     Integer, SmallInteger, String, Boolean, Date, DateTime,
     Identity, ForeignKey, UniqueConstraint, CheckConstraint,
     func, false,
@@ -44,7 +44,7 @@ academic_year = Table(
     Column("start_date", Date, nullable=False),
     Column("end_date", Date, nullable=False),
     *audit_columns(),
-    CheckConstraint("end_date > start_date", name="ck_term_dates"),
+    CheckConstraint("end_date > start_date", name="ck_academic_year_dates"),
 )
 
 term = Table(
@@ -56,7 +56,7 @@ term = Table(
     Column("start_date", Date, nullable=False),
     Column("end_date", Date, nullable=False),
     *audit_columns(),
-    UniqueConstraint("academic_year_id", "term_no", name="uq_academic_year_term_no"),
+    UniqueConstraint("academic_year_id", "term_no", name="uq_term_year_no"),
     CheckConstraint("term_no > 0", name="ck_term_no_positive"),
     CheckConstraint("end_date > start_date", name="ck_term_dates"),
 )
@@ -117,6 +117,67 @@ student = Table(
     Column("status", String(20), nullable=False),
     *audit_columns(),
     CheckConstraint("status IN ('active', 'inactive', 'graduated', 'dropped')", name="ck_student_status")
+)
+
+enrollment = Table(
+    "enrollment", metadata,
+    Column("enrollment_id", Integer, Identity(), primary_key=True),
+    Column("student_id", ForeignKey("student.student_id"), nullable=False),
+    Column("term_id", ForeignKey("term.term_id"), nullable=False),
+    Column("semester_no", SmallInteger, nullable=False),
+    Column("status", String(20), nullable=False),
+    *audit_columns(),
+    UniqueConstraint("student_id", "term_id", name="uq_enrollment_student_term"),
+    CheckConstraint("status IN ('registered', 'completed', 'withdrawn')", name="ck_enrollment_status")
+)
+
+course_offering = Table(
+    "course_offering", metadata,
+    Column("offering_id", Integer, Identity(), primary_key=True),
+    Column("course_id", ForeignKey("course.course_id"), nullable=False),
+    Column("term_id", ForeignKey("term.term_id"), nullable=False),
+    Column("faculty_id", ForeignKey("faculty.faculty_id"), nullable=False),
+    Column("section", String(5), nullable=False),
+    Column("capacity", SmallInteger, nullable=False),
+    *audit_columns(),
+    UniqueConstraint("course_id", "term_id", "section", name="uq_course_offering_course_term_section")
+)
+
+course_registration = Table(
+    "course_registration", metadata,
+    Column("registration_id", Integer, Identity(), primary_key=True),
+    Column("student_id", ForeignKey("student.student_id"), nullable=False),
+    Column("offering_id", ForeignKey("course_offering.offering_id"), nullable=False),
+    Column("registered_on", DateTime, nullable=False),
+    Column("status", String(20), nullable=False),
+    *audit_columns(),
+    UniqueConstraint("student_id", "offering_id", name="uq_course_registration_student_offering"),
+    CheckConstraint("status IN ('registered', 'dropped')", name="ck_course_registration_status")
+)
+
+class_session = Table(
+    "class_session", metadata,
+    Column("session_id", Integer, Identity(), primary_key=True),
+    Column("offering_id", ForeignKey("course_offering.offering_id"), nullable=False),
+    Column("session_date", Date, nullable=False),
+    Column("slot_no", SmallInteger, nullable=False),
+    Column("status", String(20), nullable=False),
+    *audit_columns(),
+    UniqueConstraint("offering_id", "session_date", "slot_no", name="uq_class_session_offering_date_slot"),
+    CheckConstraint("status IN ('scheduled', 'held', 'cancelled')", name="ck_class_session_status")
+)
+
+attendance = Table(
+    "attendance", metadata,
+    Column("attendance_id", BigInteger, Identity(), primary_key=True),
+    Column("session_id", ForeignKey("class_session.session_id"), nullable=False),
+    Column("student_id", ForeignKey("student.student_id"), nullable=False),
+    Column("status", String(20), nullable=False),
+    Column("marked_at", DateTime, nullable=False),
+    *audit_columns(),
+    UniqueConstraint("session_id", "student_id", name="uq_attendance_session_student"),
+    CheckConstraint("status IN ('present', 'absent','late', 'excused')", name="ck_attendance_status")
+
 )
 
 if __name__ == "__main__":
