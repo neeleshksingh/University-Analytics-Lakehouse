@@ -77,7 +77,3 @@ SELECT
         GROUP BY first_name, last_name, date_of_birth
         HAVING COUNT(*) > 1
      ) d)                                                                  AS duplicate_student_groups;
-
-
-
-     select * from student;
