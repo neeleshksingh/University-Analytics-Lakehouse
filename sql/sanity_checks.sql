@@ -61,7 +61,7 @@ SELECT
       WHERE email IS NULL AND is_deleted = false)                         AS students_no_email,
 
     (SELECT COUNT(*) FROM student
-      WHERE (phone IS NULL OR phone !~ '^[0-9]{10}$')
+      WHERE (phone IS NULL OR phone !~ '^[6-9][0-9]{9}$')
         AND is_deleted = false)                                            AS students_invalid_phone,
 
     (SELECT COUNT(*) FROM payment
