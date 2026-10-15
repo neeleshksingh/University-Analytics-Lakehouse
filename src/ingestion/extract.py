@@ -48,10 +48,14 @@ def extract_table(conn, table, query, batch_id, run_date):
     streaming = conn.execution_options(stream_results=True)
 
     for part, chunk in enumerate(pd.read_sql(query, streaming, chunksize=CHUNK_ROWS)):
+        if chunk.empty:
+            continue
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"part-{part:04d}.parquet"
         chunk.to_parquet(path, index=False)
         rows_written += len(chunk)
+        if os.environ.get("FAIL_TABLE") == table.name:          # test switch: simulate a crash
+            raise RuntimeError(f"simulated failure after writing part {part}")
         pass
 
     return rows_written
