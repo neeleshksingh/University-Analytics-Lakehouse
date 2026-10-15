@@ -7,3 +7,4 @@ pandas>=2.2
 python-dotenv>=1.0
 pytest>=8.0
 Faker==40.43.0
+pyarrow==26.0.0
