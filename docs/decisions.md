@@ -53,3 +53,63 @@ Rule of thumb: services in Docker, code you’re actively writing runs natively.
 # You found a bug earlier that only appears on Azure SQL. What was it, and what does it teach about testing?
 
 - Testing on one database doesn’t prove it works on another. Postgres is more lenient than SQL Server in places. So the schema has to be created on the real target, Azure SQL, before I trust it. That’s part of Phase 6.
+
+
+# 1. Why fake (synthetic) data is okay
+
+The problem: real university data has real people’s names, phone numbers, marks and fees. You’re not allowed to take it and put it on GitHub.
+
+The solution: we made a fictional university with fake students. But not random fake. Think of it like actors in a film. They aren’t real people, but each one plays a character consistently:
+
+a “good student” character attends ~88% of classes and scores well
+an “at-risk” character attends ~53%, scores lower, and sometimes drops out
+
+So the data behaves like a real university, even though nobody in it is real.
+
+Say: “Real student data is private, so I generated synthetic data. Each fake student has a hidden profile, so attendance, marks and fee payments follow realistic patterns instead of pure randomness.”
+
+# 2. Why a fixed random seed
+
+Imagine shuffling a deck of cards. Every shuffle gives a different order. But if you could press a button that always shuffles into exactly the same order, that’s what a seed does.
+
+seed = 42 means: every time you run the generator, you get exactly the same students, the same marks, the same everything.
+
+Why that matters: if your pipeline shows a weird number today, you can delete everything, regenerate, and the same weird number comes back. You can find the bug. With different random data each time, the problem might vanish and you’d never know why.
+
+Say: “A fixed seed makes the data reproducible. Same seed, identical data, so any bug can be reproduced and tests give the same result every time.”
+
+# 3. How delta mode helps
+
+Seed mode = writing a whole diary of the past four years in one go.
+Delta mode = writing one new page per day.
+
+Each new day, a few things change: today’s attendance is added, some fees are paid, a student moves city, a mistake gets corrected. Every changed row is stamped with that day’s date in updated_at.
+
+Why we need that:
+
+Incremental loading (Phase 3) means “only copy what changed since last time”. To test it, you need new changes to exist. Delta mode creates them.
+SCD2 (Phase 4) means “keep history when something changes”. E.g. a student lived in Ranchi, then moved to Patna, and we keep both. To test it, students must actually move. Delta mode makes that happen.
+
+Say: “Delta mode simulates one day of activity: inserts, updates and soft deletes, all stamped with that day. It gives the incremental pipeline real changes to pick up, and gives SCD2 real history to track.”
+
+# 4. Why COPY and streaming
+
+Normal insert, one row at a time: like posting 4 million letters, each in its own trip to the post office. It takes forever.
+COPY: you hand the post office one big sack with all 4 million letters. One trip.
+
+Streaming instead of a list in memory: imagine filling a water tank. You could first collect all the water in buckets in your room (your computer’s memory), then pour it all in. With 4 million rows, your room floods: the Mac runs out of memory. Streaming is like connecting a pipe directly to the tank: water flows straight through, and your room stays dry.
+
+Say: “I used PostgreSQL’s COPY to bulk-load millions of rows in one command instead of row-by-row inserts, and streamed the rows instead of building them all in memory. That kept the load to about a minute and under 300 MB of memory.”
+
+# 5. Why separate subqueries, not one big join
+
+Imagine you want to count two things at a school: students without an email, and failed payments.
+
+Your big-join query was like making a giant table where every student is paired with every one of their payments, and every exam result. One student with 10 payments and 70 results becomes 700 rows. Now when you count, you’re counting copies, not students. The numbers are inflated, and the query is very slow. That’s called fan-out.
+
+Worse, the duplicate students had no payments, so they had nothing to pair with and disappeared from the table completely. Your duplicate check couldn’t find them.
+
+Separate subqueries are like asking separate, simple questions:
+
+go to the student list and count missing emails
+go to the payments list and count bad amounts
