@@ -113,3 +113,45 @@ Separate subqueries are like asking separate, simple questions:
 
 go to the student list and count missing emails
 go to the payments list and count bad amounts
+
+# 6. What is the upper bound?
+
+The upper bound is “up to what time am I copying, tonight?”, decided before you start.
+
+Your code does it here:
+
+python
+upper_bound = conn.execute(select(func.max(table.c[control.watermark_column]))).scalar()
+
+In plain words: “find the newest updated_at in the table right now”. That timestamp is the upper bound.
+
+Why decide it first? Picture a shop closing time:
+
+At 9:00 pm, the shopkeeper says: “Today’s sales report covers everything up to 9:00.”
+A customer pays at 9:02, while the report is being written.
+That 9:02 sale isn’t in today’s report, and that’s fine. It’s in tomorrow’s report, because tomorrow covers “after 9:00”.
+
+Without a fixed closing time, the 9:02 sale might be half-counted, or counted today and tomorrow, or missed. Fixing the upper bound first means every row lands in exactly one batch. Then the watermark is set to that same upper bound, so tomorrow starts exactly where today ended.
+
+Say: “Before copying, I record the current maximum updated_at as the upper bound and copy only rows up to it. Rows that change during the copy fall after the bound and go into the next run, so nothing is lost or double-counted.”
+
+# 7. Crash after copying but before updating the watermark ⚠️ partly right
+
+Yes, it’s marked failed. But the important part is what happens next, which you just saw in Step 3.6:
+
+The watermark didn’t move (attendance stayed at 5 Oct).
+So the next run copies the same rows again: you saw 6,782 rows copied on the retry.
+Some rows end up in landing twice, and Silver removes the duplicates.
+
+Say: “The watermark only moves after a successful copy, so a crash leaves it unchanged. The next run re-copies the same rows. Nothing is lost; at most some rows arrive twice, and Silver deduplicates them by primary key.”
+
+# 8. Watermark vs CDC ❌ (this describes the watermark, not the comparison)
+
+Watermark (this project): every night you ask the table, “show me rows whose updated_at is newer than last time”.
+CDC (your banking project): Debezium reads the database’s own log of every change as it happens, like CCTV footage of everything that happened in the shop.
+
+What the watermark misses: hard deletes. If a row is truly deleted, it no longer exists, so “show me changed rows” can’t return it. CDC sees the delete in the log. That’s exactly why our source uses soft deletes (is_deleted): a “delete” becomes an update, which the watermark can see.
+
+Why use watermarks anyway? They’re simpler: no extra infrastructure like Kafka or Debezium. They’re the standard pattern in Azure Data Factory, and with soft deletes they’re good enough here.
+
+Say: “Watermarking queries for rows with a newer updated_at; CDC reads the database’s change log. Watermarks are simpler and standard in ADF, but they can’t see hard deletes, which is why the source uses soft deletes. My banking project used CDC; this one uses watermarks, so I can explain both and when to choose each.”
