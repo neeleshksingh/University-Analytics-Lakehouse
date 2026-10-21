@@ -15,6 +15,8 @@ RULES = [
          check="status <> 'success' OR amount > 0"),
     dict(table="exam_result", name="marks_within_max", severity="reject",
          check="marks_obtained IS NULL OR marks_obtained <= max_marks"),
+    dict(table="attendance", name="student_registered_in_class", severity="reject",
+        check="_dq_is_registered"),
 ]
 
 

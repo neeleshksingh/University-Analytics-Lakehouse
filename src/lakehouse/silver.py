@@ -71,6 +71,23 @@ def prepare(df, key, table_name):
     df = df.drop(*AUDIT_COLUMNS)
     return df.withColumn("_silver_updated_at", F.current_timestamp())
 
+def add_registration_flag(spark, df):
+    """Mark each attendance row: is the student registered in this class's course offering?"""
+    sessions = spark.read.format("delta").load(f"{SILVER}/class_session").select("session_id", "offering_id")
+    registrations = (
+        spark.read.format("delta").load(f"{SILVER}/course_registration")
+        .select("student_id", "offering_id").distinct()
+        .withColumn("_dq_is_registered", F.lit(True))
+    )
+
+    df = df.join(sessions, on="session_id", how="left")
+    df = df.join(registrations, on=["student_id", "offering_id"], how="left")
+    df = df.withColumn("_dq_is_registered", F.coalesce(F.col("_dq_is_registered"), F.lit(False)))
+    df = df.drop("offering_id")
+    return df
+
+
+ENRICH = {"attendance": add_registration_flag}
 
 def load_table(spark, table):
     name = str(table.name)   
@@ -86,9 +103,16 @@ def load_table(spark, table):
 
     changes = prepare(bronze.filter(F.col("_batch_id").isin(new_batches)), key, name)
 
+    enrich = ENRICH.get(name)
+    if enrich:
+        changes = enrich(spark, changes)
+
     # Apply data quality rules
     run_id = uuid.uuid4().hex[:12]
     changes, quarantine, results = apply_rules(changes, name, key, run_id)
+
+    changes = changes.drop(*[c for c in changes.columns if c.startswith("_dq_")])
+
     if quarantine is not None:
         quarantine.write.format("delta").mode("append").save(f"{OPS}/quarantine")
     if results:
@@ -117,7 +141,8 @@ def load_table(spark, table):
 
 def main():
     spark = get_spark("silver")
-    for table in SOURCE_TABLES:
+    tables = sorted(SOURCE_TABLES, key=lambda t: str(t.name) in ENRICH)
+    for table in tables:
         n = load_table(spark, table)
         print(f"{table.name:<22} {n:>12,} rows merged")
     spark.stop()
