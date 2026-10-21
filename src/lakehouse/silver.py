@@ -1,3 +1,4 @@
+import uuid
 from pyspark.sql import Window
 from pyspark.sql import functions as F
 
@@ -7,6 +8,7 @@ from src.source_db.schema import SOURCE_TABLES
 
 from delta.tables import DeltaTable
 from src.lakehouse.config import OPS
+from src.lakehouse.dq import apply_rules
 
 
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
@@ -71,17 +73,29 @@ def prepare(df, key, table_name):
 
 
 def load_table(spark, table):
+    name = str(table.name)   
     key = list(table.primary_key.columns)[0].name
-    path = f"{SILVER}/{table.name}"
-    bronze = spark.read.format("delta").load(f"{BRONZE}/{table.name}")
+    path = f"{SILVER}/{name}"
+    bronze = spark.read.format("delta").load(f"{BRONZE}/{name}")
 
-    done = processed_batches(spark, table.name)
+    done = processed_batches(spark, name)
     new_batches = [r["_batch_id"] for r in bronze.select("_batch_id").distinct().collect()
                    if r["_batch_id"] not in done]
     if not new_batches:
         return 0
 
-    changes = prepare(bronze.filter(F.col("_batch_id").isin(new_batches)), key, table.name)
+    changes = prepare(bronze.filter(F.col("_batch_id").isin(new_batches)), key, name)
+
+    # Apply data quality rules
+    run_id = uuid.uuid4().hex[:12]
+    changes, quarantine, results = apply_rules(changes, name, key, run_id)
+    if quarantine is not None:
+        quarantine.write.format("delta").mode("append").save(f"{OPS}/quarantine")
+    if results:
+        (spark.createDataFrame(results, "run_id string, table_name string, rule string, severity string, "
+                                        "rows_checked long, rows_failed long")
+              .withColumn("checked_at", F.current_timestamp())
+              .write.format("delta").mode("append").save(f"{OPS}/dq_results"))
 
     if not DeltaTable.isDeltaTable(spark, path):
         # First run: the table doesn't exist yet, so create it
@@ -97,7 +111,7 @@ def load_table(spark, table):
         )
         pass
 
-    record_batches(spark, table.name, new_batches)
+    record_batches(spark, name, new_batches)
     return changes.count()
 
 

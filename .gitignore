@@ -10,7 +10,7 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 explore.py
-
+history_check.py
 # ===== Secrets and local settings (never commit) =====
 .env
 .env.*
