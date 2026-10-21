@@ -5,6 +5,10 @@ from src.lakehouse.config import BRONZE, SILVER
 from src.lakehouse.spark import get_spark
 from src.source_db.schema import SOURCE_TABLES
 
+from delta.tables import DeltaTable
+from src.lakehouse.config import OPS
+
+
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
 
 STANDARDIZE = {
@@ -12,6 +16,7 @@ STANDARDIZE = {
     "faculty": {"email": F.lower},
 }
 
+PROGRESS = f"{OPS}/silver_progress"
 
 def standardize(df, table_name):
     for column, rule in STANDARDIZE.get(table_name, {}).items():
@@ -38,27 +43,69 @@ def clean_text(df):
     return df
 
 
-def build_table(spark, table):
+def processed_batches(spark, table_name):
+    """Bronze batches Silver has already merged for this table."""
+    if not DeltaTable.isDeltaTable(spark, PROGRESS):
+        return set()
+    rows = (spark.read.format("delta").load(PROGRESS)
+            .filter(F.col("table_name") == table_name)
+            .select("batch_id").collect())
+    return {row["batch_id"] for row in rows}
+
+
+def record_batches(spark, table_name, batch_ids):
+    """Remember these batches as done. Called only after a successful MERGE."""
+    rows = [(str(table_name), str(b)) for b in batch_ids]
+    (spark.createDataFrame(rows, "table_name string, batch_id string")
+        .withColumn("processed_at", F.current_timestamp())
+        .write.format("delta").mode("append").save(PROGRESS))
+
+
+def prepare(df, key, table_name):
+    """Turn raw Bronze rows into clean Silver rows (one per key)."""
+    df = latest_rows(df, key)
+    df = clean_text(df)
+    df = standardize(df, table_name)
+    df = df.drop(*AUDIT_COLUMNS)
+    return df.withColumn("_silver_updated_at", F.current_timestamp())
+
+
+def load_table(spark, table):
     key = list(table.primary_key.columns)[0].name
+    path = f"{SILVER}/{table.name}"
     bronze = spark.read.format("delta").load(f"{BRONZE}/{table.name}")
 
-    silver = latest_rows(bronze, key)
-    silver = clean_text(silver)
-    silver = standardize(silver, table.name)
-    silver = silver.drop(*AUDIT_COLUMNS)
+    done = processed_batches(spark, table.name)
+    new_batches = [r["_batch_id"] for r in bronze.select("_batch_id").distinct().collect()
+                   if r["_batch_id"] not in done]
+    if not new_batches:
+        return 0
 
-    _silver_updated_at = F.current_timestamp()
-    silver = silver.withColumn("_silver_updated_at", _silver_updated_at)
+    changes = prepare(bronze.filter(F.col("_batch_id").isin(new_batches)), key, table.name)
 
-    path = f"{SILVER}/{table.name}"
-    silver.write.format("delta").mode("overwrite").save(path)
-    return spark.read.format("delta").load(path).count()
+    if not DeltaTable.isDeltaTable(spark, path):
+        # First run: the table doesn't exist yet, so create it
+        changes.write.format("delta").save(path)
+    else:
+        target = DeltaTable.forPath(spark, path)
+        (
+            target.alias("t")
+            .merge(changes.alias("s"), f"t.{key} = s.{key}")
+            .whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+        pass
+
+    record_batches(spark, table.name, new_batches)
+    return changes.count()
 
 
 def main():
     spark = get_spark("silver")
     for table in SOURCE_TABLES:
-        print(f"{table.name:<22} {build_table(spark, table):>12,} rows")
+        n = load_table(spark, table)
+        print(f"{table.name:<22} {n:>12,} rows merged")
     spark.stop()
 
 
