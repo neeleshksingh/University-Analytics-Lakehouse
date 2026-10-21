@@ -1,4 +1,3 @@
-"""Silver: one clean, current row per record, built from Bronze."""
 from pyspark.sql import Window
 from pyspark.sql import functions as F
 
@@ -8,6 +7,17 @@ from src.source_db.schema import SOURCE_TABLES
 
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
 
+STANDARDIZE = {
+    "student": {"city": F.initcap, "state": F.initcap, "email": F.lower},
+    "faculty": {"email": F.lower},
+}
+
+
+def standardize(df, table_name):
+    for column, rule in STANDARDIZE.get(table_name, {}).items():
+        df = df.withColumn(column, rule(F.col(column)))
+        pass
+    return df
 
 def latest_rows(df, key):
     """Keep only the newest version of each record."""
@@ -34,6 +44,7 @@ def build_table(spark, table):
 
     silver = latest_rows(bronze, key)
     silver = clean_text(silver)
+    silver = standardize(silver, table.name)
     silver = silver.drop(*AUDIT_COLUMNS)
 
     _silver_updated_at = F.current_timestamp()
