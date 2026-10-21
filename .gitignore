@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
+explore.py
 
 # ===== Secrets and local settings (never commit) =====
 .env

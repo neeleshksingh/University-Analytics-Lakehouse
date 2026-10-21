@@ -17,6 +17,10 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import update
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, SmallInteger, String
+
 LAKE = Path("lake/landing")
 CHUNK_ROWS = 200_000
 
@@ -41,6 +45,28 @@ def build_query(table, control, upper_bound):
         pass
     return query
 
+def arrow_schema(table):
+    """The exact Parquet types for a source table, taken from schema.py instead of guessed."""
+    fields = []
+    for col in table.columns:
+        t = col.type
+        if isinstance(t, (Integer, SmallInteger, BigInteger)):
+            arrow_type = pa.int64()
+        elif isinstance(t, Numeric):
+            arrow_type = pa.decimal128(t.precision, t.scale)
+        elif isinstance(t, Boolean):
+            arrow_type = pa.bool_()
+        elif isinstance(t, DateTime):
+            arrow_type = pa.timestamp("us")
+        elif isinstance(t, Date):
+            arrow_type = pa.date32()
+        elif isinstance(t, String):
+            arrow_type = pa.string()
+        else:
+            raise TypeError(f"No Parquet type mapped for {table.name}.{col.name}: {t!r}")
+        fields.append(pa.field(col.name, arrow_type))
+    return pa.schema(fields)
+
 def extract_table(conn, table, query, batch_id, run_date):
     """Step 3: copy the query's rows into Parquet files. Returns the number of rows written."""
     folder = LAKE / table.name / f"ingest_date={run_date}" / f"batch_id={batch_id}"
@@ -52,7 +78,8 @@ def extract_table(conn, table, query, batch_id, run_date):
             continue
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"part-{part:04d}.parquet"
-        chunk.to_parquet(path, index=False)
+        arrow_table = pa.Table.from_pandas(chunk, schema=arrow_schema(table), preserve_index=False)
+        pq.write_table(arrow_table, path)
         rows_written += len(chunk)
         if os.environ.get("FAIL_TABLE") == table.name:          # test switch: simulate a crash
             raise RuntimeError(f"simulated failure after writing part {part}")
