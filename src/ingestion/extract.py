@@ -73,7 +73,7 @@ def extract_table(conn, table, query, batch_id, run_date):
     rows_written = 0
     streaming = conn.execution_options(stream_results=True)
 
-    for part, chunk in enumerate(pd.read_sql(query, streaming, chunksize=CHUNK_ROWS)):
+    for part, chunk in enumerate(pd.read_sql(query, streaming, chunksize=CHUNK_ROWS, coerce_float=False)):
         if chunk.empty:
             continue
         folder.mkdir(parents=True, exist_ok=True)
