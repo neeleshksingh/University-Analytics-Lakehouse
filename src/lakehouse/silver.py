@@ -10,6 +10,9 @@ from delta.tables import DeltaTable
 from src.lakehouse.config import OPS
 from src.lakehouse.dq import apply_rules
 
+from src.lakehouse.dq import apply_rules, critical_checks, CriticalCheckFailed
+from src.source_db.schema import SOURCE_TABLES, FULL_LOAD_TABLES
+
 
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
 
@@ -106,10 +109,18 @@ def load_table(spark, table):
     enrich = ENRICH.get(name)
     if enrich:
         changes = enrich(spark, changes)
+    changes = changes.cache()
 
     # Apply data quality rules
     run_id = uuid.uuid4().hex[:12]
+
+    previous = None
+    if name in FULL_LOAD_TABLES and DeltaTable.isDeltaTable(spark, path):   # see note below
+        previous = spark.read.format("delta").load(path).count()
+
+    critical_results, failures = critical_checks(changes, name, key, run_id, previous)
     changes, quarantine, results = apply_rules(changes, name, key, run_id)
+    results = critical_results + results
 
     changes = changes.drop(*[c for c in changes.columns if c.startswith("_dq_")])
 
@@ -120,6 +131,9 @@ def load_table(spark, table):
                                         "rows_checked long, rows_failed long")
               .withColumn("checked_at", F.current_timestamp())
               .write.format("delta").mode("append").save(f"{OPS}/dq_results"))
+
+    if failures:
+        raise CriticalCheckFailed("; ".join(failures))
 
     if not DeltaTable.isDeltaTable(spark, path):
         # First run: the table doesn't exist yet, so create it
@@ -136,7 +150,9 @@ def load_table(spark, table):
         pass
 
     record_batches(spark, name, new_batches)
-    return changes.count()
+    n = changes.count()     
+    changes.unpersist()    
+    return n
 
 
 def main():

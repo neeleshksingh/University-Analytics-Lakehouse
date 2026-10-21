@@ -54,3 +54,37 @@ def apply_rules(df, table_name, key, run_id):
     allowed = df.filter(all_rejects_pass)
     quarantine = reduce(DataFrame.unionByName, quarantine_parts) if quarantine_parts else None
     return allowed, quarantine, results
+
+class CriticalCheckFailed(Exception):
+    """Data is too broken to continue. Stops the run before MERGE."""
+
+
+MIN_VOLUME_RATIO = 0.5 
+
+
+def critical_checks(df, table_name, key, run_id, previous_count=None):
+    """Checks that stop the pipeline. Returns (results, failures)."""
+    total = df.count()
+    results, failures = [], []
+
+    # 1. Primary key must never be NULL
+    null_keys = df.filter(F.col(key).isNull()).count()
+    results.append((run_id, table_name, "key_not_null", "critical", total, null_keys))
+    if null_keys > 0:
+        failures.append(f"{table_name}: {null_keys} rows with NULL {key}")
+
+    # 2. Primary key must be unique (dedup should guarantee this, so this is a guard)
+    duplicates = df.groupBy(key).count().filter("count > 1").count()
+    results.append((run_id, table_name, "key_unique", "critical", total, duplicates))
+    if duplicates > 0:
+        failures.append(f"{table_name}: {duplicates} duplicate {key} values")
+
+    # 3. Full-load tables must not suddenly shrink
+    if previous_count:   # None or 0 means first run, so there's nothing to compare against
+        shrank = total < previous_count * MIN_VOLUME_RATIO
+        results.append((run_id, table_name, "volume_not_shrunk", "critical",
+                        total, previous_count - total if shrank else 0))
+        if shrank:
+            failures.append(f"{table_name}: {total} rows, Silver has {previous_count}")
+
+    return results, failures
