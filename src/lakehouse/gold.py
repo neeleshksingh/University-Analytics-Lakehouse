@@ -150,6 +150,39 @@ def build_dim_student(spark):
         .whenNotMatchedInsert(values={c: f"s.{c}" for c in STUDENT_COLUMNS})
         .execute())
 
+def build_fact_attendance(spark):
+    """Grain: one row per student per class session."""
+    attendance = silver(spark, "attendance").select(
+        "attendance_id", "session_id", "student_id", "status", "marked_at")
+    sessions = silver(spark, "class_session").select("session_id", "offering_id", "session_date")
+    offerings = silver(spark, "course_offering").select("offering_id", "course_id", "term_id", "faculty_id")
+    students = (spark.read.format("delta").load(f"{GOLD}/dim_student")
+                .select("student_sk",
+                        F.col("student_id").alias("dim_student_id"),
+                        "valid_from", "valid_to"))
+
+    df = attendance.join(sessions, on="session_id", how="inner").join(offerings, on="offering_id", how="inner")
+
+    in_version = (
+        (F.col("student_id") == F.col("dim_student_id"))
+        & (F.col("marked_at") >= F.col("valid_from"))
+        & (F.col("marked_at") < F.col("valid_to"))
+    )
+    df = df.join(F.broadcast(students), on=in_version, how="inner")
+
+    return df.select(
+        "attendance_id",
+        F.date_format("session_date", "yyyyMMdd").cast("int").alias("date_key"),
+        "student_sk", "student_id", "course_id", "term_id", "faculty_id", "offering_id", "session_id", "status",
+        F.when(F.col("status").isin("present", "late"), 1).otherwise(0).alias("is_present"),
+        F.when(F.col("status") == "excused", 1).otherwise(0).alias("is_excused"),
+    )
+
+
+FACTS = {
+    "fact_attendance": build_fact_attendance,
+}
+
 
 def main():
     spark = get_spark("gold")
@@ -157,9 +190,15 @@ def main():
         df = build(spark)
         save(df, name)
         print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+
     build_dim_student(spark)
     dim = spark.read.format("delta").load(f"{GOLD}/dim_student")
     print(f"{'dim_student':<22} {dim.count():>10,} rows ({dim.filter('is_current').count():,} current)")
+
+    for name, build in FACTS.items():
+        save(build(spark), name)
+        print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+
     spark.stop()
 
 
