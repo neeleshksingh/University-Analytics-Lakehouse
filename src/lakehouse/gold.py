@@ -1,14 +1,17 @@
+from delta.tables import DeltaTable
 from pyspark.sql import functions as F
 
 from src.lakehouse.config import SILVER, GOLD
 from src.lakehouse.spark import get_spark
-from delta.tables import DeltaTable   # add to imports
 
-TRACKED = ["program_id", "status", "city", "state"]   # changes here create a new version
+TRACKED = ["program_id", "status", "city", "state"]
 OPEN_END = "9999-12-31"
 STUDENT_COLUMNS = ["student_sk", "student_id", "roll_no", "full_name", "gender", "admission_year",
                    "program_id", "city", "state", "status",
                    "valid_from", "valid_to", "is_current", "row_hash"]
+
+
+# ---------------------------------------------------------------- helpers
 
 def silver(spark, name):
     """Read a Silver table, without soft-deleted rows."""
@@ -21,6 +24,7 @@ def save(df, name):
     (df.write.format("delta").mode("overwrite")
        .option("overwriteSchema", "true").save(f"{GOLD}/{name}"))
 
+
 def departments(spark):
     """Department columns, renamed so they don't clash with the table we join to."""
     return silver(spark, "department").select(
@@ -28,6 +32,14 @@ def departments(spark):
         F.col("dept_code").alias("department_code"),
         F.col("name").alias("department_name"),
     )
+
+
+def date_key(col):
+    """2024-07-03 -> 20240703, the key used by dim_date."""
+    return F.date_format(col, "yyyyMMdd").cast("int")
+
+
+# ---------------------------------------------------------------- dimensions
 
 def build_dim_date(spark):
     """One row per calendar day, from the first academic year to today."""
@@ -37,7 +49,7 @@ def build_dim_date(spark):
     )
     dates = bounds.select(F.explode(F.sequence("lo", "hi")).alias("date"))
     return dates.select(
-        F.date_format("date", "yyyyMMdd").cast("int").alias("date_key"),   # 2024-07-03 -> 20240703
+        date_key("date").alias("date_key"),
         "date",
         F.year("date").alias("year"),
         F.month("date").alias("month"),
@@ -66,19 +78,21 @@ def build_dim_course(spark):
         "department_code", "department_name",
     )
 
+
 def build_dim_faculty(spark):
     df = silver(spark, "faculty").join(departments(spark), on="department_id", how="inner")
     return df.select(
-        "faculty_id", "faculty_code", F.concat_ws(" ", "first_name", "last_name").alias("full_name"),
+        "faculty_id", "faculty_code",
+        F.concat_ws(" ", "first_name", "last_name").alias("full_name"),
         "designation", "status", "joined_on",
-        "department_code", "department_name"
+        "department_code", "department_name",
     )
 
 
 def build_dim_term(spark):
     years = silver(spark, "academic_year").select(
-        "academic_year_id",                          
-        F.col("label").alias("academic_year"),      
+        "academic_year_id",
+        F.col("label").alias("academic_year"),
     )
     df = silver(spark, "term").join(years, on="academic_year_id", how="inner")
     return df.select(
@@ -92,8 +106,11 @@ DIMENSIONS = {
     "dim_program": build_dim_program,
     "dim_faculty": build_dim_faculty,
     "dim_course": build_dim_course,
-    "dim_term": build_dim_term
+    "dim_term": build_dim_term,
 }
+
+
+# ---------------------------------------------------------------- dim_student (SCD Type 2)
 
 def student_snapshot(spark):
     """Current Silver students + a fingerprint of the tracked columns."""
@@ -138,57 +155,127 @@ def build_dim_student(spark):
     staged = with_scd_columns(
         changed.withColumn("merge_key", F.col("student_id"))
         .unionByName(changed.withColumn("merge_key", no_key))
-        .unionByName(new.withColumn("merge_key", no_key))   
+        .unionByName(new.withColumn("merge_key", no_key))
     )
 
     (DeltaTable.forPath(spark, path).alias("t")
         .merge(staged.alias("s"), "t.student_id = s.merge_key AND t.is_current = true")
         .whenMatchedUpdate(set={
             "is_current": "false",
-            "valid_to": "s.valid_from"
+            "valid_to": "s.valid_from",
         })
         .whenNotMatchedInsert(values={c: f"s.{c}" for c in STUDENT_COLUMNS})
         .execute())
 
-def build_fact_attendance(spark):
-    """Grain: one row per student per class session."""
-    attendance = silver(spark, "attendance").select(
-        "attendance_id", "session_id", "student_id", "status", "marked_at")
-    sessions = silver(spark, "class_session").select("session_id", "offering_id", "session_date")
-    offerings = silver(spark, "course_offering").select("offering_id", "course_id", "term_id", "faculty_id")
+
+def attach_student_sk(spark, df, at_col):
+    """Add student_sk: the dim_student version valid at the timestamp in `at_col`.
+    df must have student_id. Returns df plus student_sk."""
     students = (spark.read.format("delta").load(f"{GOLD}/dim_student")
                 .select("student_sk",
                         F.col("student_id").alias("dim_student_id"),
                         "valid_from", "valid_to"))
 
-    df = attendance.join(sessions, on="session_id", how="inner").join(offerings, on="offering_id", how="inner")
-
     in_version = (
         (F.col("student_id") == F.col("dim_student_id"))
-        & (F.col("marked_at") >= F.col("valid_from"))
-        & (F.col("marked_at") < F.col("valid_to"))
+        & (F.col(at_col) >= F.col("valid_from"))
+        & (F.col(at_col) < F.col("valid_to"))
     )
-    df = df.join(F.broadcast(students), on=in_version, how="inner")
+
+    return (df.join(F.broadcast(students), on=in_version, how="inner")
+              .drop("dim_student_id", "valid_from", "valid_to"))
+
+
+# ---------------------------------------------------------------- facts
+
+def build_fact_attendance(spark):
+    """Grain: one row per student per class session."""
+    # attendance --session_id--> class_session --offering_id--> course_offering
+    attendance = silver(spark, "attendance").select(
+        "attendance_id", "session_id", "student_id", "status", "marked_at")
+    sessions = silver(spark, "class_session").select("session_id", "offering_id", "session_date")
+    offerings = silver(spark, "course_offering").select("offering_id", "course_id", "term_id", "faculty_id")
+
+    df = (attendance
+          .join(sessions, on="session_id", how="inner")
+          .join(offerings, on="offering_id", how="inner"))
+    df = attach_student_sk(spark, df, "marked_at")
 
     return df.select(
         "attendance_id",
-        F.date_format("session_date", "yyyyMMdd").cast("int").alias("date_key"),
-        "student_sk", "student_id", "course_id", "term_id", "faculty_id", "offering_id", "session_id", "status",
-        F.when(F.col("status").isin("present", "late"), 1).otherwise(0).alias("is_present"),
-        F.when(F.col("status") == "excused", 1).otherwise(0).alias("is_excused"),
+        date_key("session_date").alias("date_key"),
+        "student_sk", "student_id", "course_id", "term_id", "faculty_id", "offering_id", "session_id",
+        "status",
+        F.col("status").isin("present", "late").cast("int").alias("is_present"),
+        (F.col("status") == "excused").cast("int").alias("is_excused"),
+    )
+
+
+def build_fact_exam_result(spark):
+    """Grain: one row per student per exam per course."""
+    # exam_result --registration_id--> course_registration --offering_id--> course_offering
+    # exam_result --exam_id--> exam
+    results = silver(spark, "exam_result").select(
+        "result_id", "exam_id", "registration_id", "marks_obtained", "max_marks", "grade", "result_status")
+    registrations = silver(spark, "course_registration").select("registration_id", "student_id", "offering_id")
+    offerings = silver(spark, "course_offering").select("offering_id", "course_id", "term_id", "faculty_id")
+    exams = silver(spark, "exam").select(
+        "exam_id", "exam_type", F.col("end_date").cast("timestamp").alias("exam_at"))
+
+    df = (results
+          .join(registrations, on="registration_id", how="inner")
+          .join(offerings, on="offering_id", how="inner")
+          .join(exams, on="exam_id", how="inner"))
+    df = attach_student_sk(spark, df, "exam_at")
+
+    return df.select(
+        "result_id",
+        date_key("exam_at").alias("date_key"),
+        "student_sk", "student_id", "course_id", "term_id", "faculty_id", "exam_id", "exam_type",
+        "marks_obtained", "max_marks",
+        F.round(F.col("marks_obtained") / F.col("max_marks") * 100, 2).alias("score_pct"),
+        "grade", "result_status",
+        (F.col("result_status") == "pass").cast("int").alias("is_pass"),
+    )
+
+
+def build_fact_payment(spark):
+    """Grain: one row per payment attempt."""
+    # payment --invoice_id--> fee_invoice --enrollment_id--> enrollment
+    payments = silver(spark, "payment").select(
+        "payment_id", "invoice_id", "amount", "mode", "status", "paid_at")
+    invoices = silver(spark, "fee_invoice").select(
+        "invoice_id", "enrollment_id", "fee_component_id", "due_date")   # no amount/status: they'd clash
+    enrollments = silver(spark, "enrollment").select("enrollment_id", "student_id", "term_id")
+
+    df = (payments
+          .join(invoices, on="invoice_id", how="inner")
+          .join(enrollments, on="enrollment_id", how="inner"))
+    df = attach_student_sk(spark, df, "paid_at")
+
+    return df.select(
+        "payment_id",
+        date_key("paid_at").alias("date_key"),
+        "student_sk", "student_id", "term_id", "invoice_id", "fee_component_id",
+        "mode", "status", "amount",
+        F.when(F.col("status") == "success", F.col("amount")).otherwise(F.lit(0)).alias("amount_collected"),
+        F.datediff(F.col("paid_at"), F.col("due_date")).alias("days_after_due"),
     )
 
 
 FACTS = {
     "fact_attendance": build_fact_attendance,
+    "fact_exam_result": build_fact_exam_result,
+    "fact_payment": build_fact_payment,
 }
 
+
+# ---------------------------------------------------------------- run
 
 def main():
     spark = get_spark("gold")
     for name, build in DIMENSIONS.items():
-        df = build(spark)
-        save(df, name)
+        save(build(spark), name)
         print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
 
     build_dim_student(spark)
