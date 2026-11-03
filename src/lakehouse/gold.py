@@ -435,19 +435,19 @@ def main():
     spark = get_spark("gold")
     for name, build in DIMENSIONS.items():
         save(build(spark), name)
-        print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
 
     build_dim_student(spark)
     dim = spark.read.format("delta").load(f"{GOLD}/dim_student")
-    print(f"{'dim_student':<22} {dim.count():>10,} rows ({dim.filter('is_current').count():,} current)")
+    print(f"{'dim_student':<30} {dim.count():>10,} rows ({dim.filter('is_current').count():,} current)")
 
     for name, build in FACTS.items():
         save(build(spark), name)
-        print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
 
     for name, build in MARTS.items():
-            save(build(spark), name)
-            print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        save(build(spark), name)
+        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
 
     spark.stop()
 

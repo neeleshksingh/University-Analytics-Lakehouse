@@ -25,8 +25,7 @@ def apply_rules(df, table_name, key, run_id):
     rules = [r for r in RULES if r["table"] == table_name]
     if not rules:
         return df, None, []
-
-    df = df.cache()                    
+                  
     total = df.count()
     quarantine_parts, results = [], []
     all_rejects_pass = F.lit(True)

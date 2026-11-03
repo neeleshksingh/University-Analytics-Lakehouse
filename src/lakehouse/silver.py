@@ -26,7 +26,6 @@ PROGRESS = f"{OPS}/silver_progress"
 def standardize(df, table_name):
     for column, rule in STANDARDIZE.get(table_name, {}).items():
         df = df.withColumn(column, rule(F.col(column)))
-        pass
     return df
 
 def latest_rows(df, key):
@@ -94,7 +93,7 @@ ENRICH = {"attendance": add_registration_flag}
 
 def load_table(spark, table):
     name = str(table.name)   
-    key = list(table.primary_key.columns)[0].name
+    key = str(list(table.primary_key.columns)[0].name)
     path = f"{SILVER}/{name}"
     bronze = spark.read.format("delta").load(f"{BRONZE}/{name}")
 
@@ -147,7 +146,6 @@ def load_table(spark, table):
             .whenNotMatchedInsertAll()
             .execute()
         )
-        pass
 
     record_batches(spark, name, new_batches)
     n = changes.count()     
@@ -160,7 +158,7 @@ def main():
     tables = sorted(SOURCE_TABLES, key=lambda t: str(t.name) in ENRICH)
     for table in tables:
         n = load_table(spark, table)
-        print(f"{table.name:<22} {n:>12,} rows merged")
+        print(f"{table.name:<22} {n:>12,} rows processed")
     spark.stop()
 
 
