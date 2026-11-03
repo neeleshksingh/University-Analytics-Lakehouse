@@ -269,6 +269,63 @@ FACTS = {
     "fact_payment": build_fact_payment,
 }
 
+# ---------------------------------------------------------------- marts
+
+ELIGIBILITY_THRESHOLD = 75.0
+EXCUSED_COUNTS_AS_PRESENT = True
+
+
+def gold(spark, name):
+    return spark.read.format("delta").load(f"{GOLD}/{name}")
+
+
+def build_mart_attendance_eligibility(spark):
+    """Grain: one row per student per course offering. Below threshold = not eligible for end-term."""
+    attended = F.col("is_present") + (F.col("is_excused") if EXCUSED_COUNTS_AS_PRESENT else F.lit(0))
+
+    per_course = (gold(spark, "fact_attendance")
+                  .groupBy("student_id", "offering_id", "course_id", "term_id")
+                  .agg(
+                      F.count("*").alias("sessions_held"),
+                      F.sum(attended).alias("sessions_attended"),
+                      F.sum("is_excused").alias("sessions_excused"),
+                  ))
+
+    per_course = (per_course
+        .withColumn("attendance_pct", F.round(F.col("sessions_attended") / F.col("sessions_held") * 100, 2))
+        .withColumn("is_eligible", F.col("attendance_pct") >= ELIGIBILITY_THRESHOLD))
+
+    students = (gold(spark, "dim_student").filter("is_current")
+                .select("student_id", "roll_no", "full_name", "program_id", "status"))
+    programs = gold(spark, "dim_program").select("program_id", "program_name")
+    courses = gold(spark, "dim_course").select("course_id", "course_code", "course_title")
+    terms = gold(spark, "dim_term").select("term_id", "term_name", "academic_year", "start_date", "end_date")
+
+    df = (per_course
+        .join(students, on="student_id", how="inner")
+        .join(programs, on="program_id", how="inner")
+        .join(courses, on="course_id", how="inner")
+        .join(terms, on="term_id", how="inner"))
+
+    df = (df
+        .withColumn("is_term_complete", F.col("end_date") < F.current_date())
+        .withColumn("eligibility_status",
+            F.when(F.col("is_eligible"), "eligible")
+             .when(F.col("is_term_complete"), "not_eligible")
+             .otherwise("at_risk")))
+
+    return df.select(
+        "academic_year", "term_name", "start_date", "program_name", "course_code", "course_title",
+        "roll_no", "full_name", F.col("status").alias("student_status"),
+        "sessions_held", "sessions_attended", "sessions_excused",
+        "attendance_pct", "is_eligible", "is_term_complete", "eligibility_status",
+        "student_id", "offering_id", "course_id", "term_id",
+    )
+
+
+MARTS = {
+    "mart_attendance_eligibility": build_mart_attendance_eligibility,
+}
 
 # ---------------------------------------------------------------- run
 
@@ -285,6 +342,10 @@ def main():
     for name, build in FACTS.items():
         save(build(spark), name)
         print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+
+    for name, build in MARTS.items():
+            save(build(spark), name)
+            print(f"{name:<22} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
 
     spark.stop()
 
