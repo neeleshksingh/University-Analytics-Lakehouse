@@ -100,6 +100,11 @@ def build_dim_term(spark):
         "start_date", "end_date", "academic_year",
     )
 
+def build_dim_fee_component(spark):
+    return silver(spark, "fee_component").select(
+        "fee_component_id", F.col("code").alias("fee_code"), F.col("name").alias("fee_name"), "is_refundable"
+    )
+
 
 DIMENSIONS = {
     "dim_date": build_dim_date,
@@ -107,6 +112,7 @@ DIMENSIONS = {
     "dim_faculty": build_dim_faculty,
     "dim_course": build_dim_course,
     "dim_term": build_dim_term,
+    "dim_fee_component": build_dim_fee_component,
 }
 
 
@@ -262,11 +268,34 @@ def build_fact_payment(spark):
         F.datediff(F.col("paid_at"), F.col("due_date")).alias("days_after_due"),
     )
 
+def build_fact_fee_invoice(spark):
+    """Grain: one row per invoice."""
+    # fee_invoice --enrollment_id--> enrollment
+    invoices = silver(spark, "fee_invoice").select(
+        "invoice_id", "invoice_no", "enrollment_id", "fee_component_id",
+        "issue_date", "due_date", "amount", "status",
+        F.col("issue_date").cast("timestamp").alias("issued_at"),
+    )
+    enrollments = silver(spark, "enrollment").select("enrollment_id", "student_id", "term_id")
+
+    df = invoices.join(enrollments, on="enrollment_id", how="inner")
+    df = attach_student_sk(spark, df, "issued_at")
+
+    return df.select(
+        "invoice_id", "invoice_no",
+        date_key("issue_date").alias("date_key"),
+        "student_sk", "student_id", "term_id", "fee_component_id",
+        "issue_date", "due_date",
+        F.col("amount").alias("amount_due"),
+        F.col("status").alias("invoice_status"),
+    )
+
 
 FACTS = {
     "fact_attendance": build_fact_attendance,
     "fact_exam_result": build_fact_exam_result,
     "fact_payment": build_fact_payment,
+    "fact_fee_invoice": build_fact_fee_invoice,
 }
 
 # ---------------------------------------------------------------- marts
@@ -322,9 +351,52 @@ def build_mart_attendance_eligibility(spark):
         "student_id", "offering_id", "course_id", "term_id",
     )
 
+AGING_BUCKETS = [(0, "not_due"), (30, "1-30"), (60, "31-60"), (90, "61-90")]
+
+
+def build_mart_fee_aging(spark):
+    """Grain: one row per invoice with money still owed, aged as of the latest date in the data."""
+    payments = gold(spark, "fact_payment")
+    as_of = payments.agg(F.to_date(F.max("date_key").cast("string"), "yyyyMMdd")).first()[0]
+
+    paid = payments.groupBy("invoice_id").agg(F.sum("amount_collected").alias("amount_paid"))
+    invoices = gold(spark, "fact_fee_invoice").filter(F.col("invoice_status") != "cancelled")
+
+    df = (invoices
+          .join(paid, on="invoice_id", how="left")
+          .withColumn("amount_paid", F.coalesce(F.col("amount_paid"), F.lit(0))))
+
+    df = df.withColumn("outstanding", F.col("amount_due") - F.col("amount_paid")).filter(F.col("outstanding") > 0)
+
+    df = df.withColumn("days_overdue", F.datediff(F.lit(as_of), "due_date"))
+
+    bucket = F.lit("90+")
+    for limit, label in reversed(AGING_BUCKETS):
+        bucket = F.when(F.col("days_overdue") <= limit, label).otherwise(bucket)
+    df = df.withColumn("aging_bucket", bucket).withColumn("as_of_date", F.lit(as_of))
+
+    students = (gold(spark, "dim_student").filter("is_current")
+                .select("student_id", "roll_no", "full_name", "program_id", "status"))
+    programs = gold(spark, "dim_program").select("program_id", "program_name")
+    terms = gold(spark, "dim_term").select("term_id", "term_name", "start_date")
+    fees = gold(spark, "dim_fee_component").select("fee_component_id", "fee_name")
+
+    df = (df
+        .join(students, on="student_id", how="inner")
+        .join(programs, on="program_id", how="inner")
+        .join(terms, on="term_id", how="inner")
+        .join(fees, on="fee_component_id", how="inner"))
+
+    return df.select(
+        "as_of_date", "term_name", "start_date", "program_name", "roll_no", "full_name",
+        F.col("status").alias("student_status"), "fee_name", "invoice_no",
+        "due_date", "amount_due", "amount_paid", "outstanding", "days_overdue", "aging_bucket",
+        "invoice_id", "student_id", "term_id", "fee_component_id",
+    )
 
 MARTS = {
     "mart_attendance_eligibility": build_mart_attendance_eligibility,
+    "mart_fee_aging": build_mart_fee_aging,
 }
 
 # ---------------------------------------------------------------- run
