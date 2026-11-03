@@ -394,9 +394,39 @@ def build_mart_fee_aging(spark):
         "invoice_id", "student_id", "term_id", "fee_component_id",
     )
 
+def build_mart_course_results(spark):
+    """Grain: one row per term x course x exam type."""
+
+    per_course = (gold(spark, "fact_exam_result")
+                  .groupBy("term_id", "course_id", "exam_type")
+                  .agg(
+                      F.count("*").alias("students"),
+                      F.sum((F.col("result_status") == "absent").cast("int")).alias("absent"),
+                      F.sum("is_pass").alias("passed"),
+                      F.round(F.avg("score_pct"), 2).alias("avg_score_pct"),
+                  ))
+
+    per_course = (per_course
+        .withColumn("appeared", F.col("students") - F.col("absent"))
+        .withColumn("pass_rate_pct", F.round(F.col("passed") / F.col("appeared") * 100, 2)))
+
+    courses = gold(spark, "dim_course").select("course_id", "course_code", "course_title", "department_name")
+    terms = gold(spark, "dim_term").select("term_id", "term_name", "academic_year", "start_date")
+
+    df = (per_course
+        .join(courses, on="course_id", how="inner")
+        .join(terms, on="term_id", how="inner"))
+
+    return df.select(
+        "academic_year", "term_name", "start_date", "department_name", "course_code", "course_title",
+        "exam_type", "students", "absent", "appeared", "passed", "pass_rate_pct", "avg_score_pct",
+        "term_id", "course_id",
+    )
+
 MARTS = {
     "mart_attendance_eligibility": build_mart_attendance_eligibility,
     "mart_fee_aging": build_mart_fee_aging,
+    "mart_course_results": build_mart_course_results,
 }
 
 # ---------------------------------------------------------------- run
