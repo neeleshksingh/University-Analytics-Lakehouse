@@ -3,7 +3,7 @@ from pathlib import Path
 
 from src.lakehouse import storage
 from src.lakehouse.gold import MARTS
-from src.lakehouse.spark import get_spark
+from src.lakehouse.spark import get_spark, stop_spark
 
 EXPORT = Path("exports")
 
@@ -16,7 +16,7 @@ def main():
         path = EXPORT / f"{name}.csv"
         df.to_csv(path, index=False)
         print(f"{name:<30} {len(df):>10,} rows -> {path}")
-    spark.stop()
+    stop_spark(spark)
 
 
 if __name__ == "__main__":

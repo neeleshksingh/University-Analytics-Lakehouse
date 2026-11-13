@@ -57,3 +57,12 @@ def write(df, layer, name, mode="append", overwrite_schema=False):
         writer.saveAsTable(location(layer, name))
     else:
         writer.save(location(layer, name))
+
+def cache(df):
+    """Cache locally; serverless Databricks doesn't support caching."""
+    return df if on_databricks() else df.cache()
+
+
+def uncache(df):
+    if not on_databricks():
+        df.unpersist()

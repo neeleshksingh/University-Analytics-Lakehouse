@@ -5,7 +5,7 @@ from pyspark.sql import functions as F
 
 from src.lakehouse import storage
 from src.lakehouse.dq import apply_rules, critical_checks, CriticalCheckFailed
-from src.lakehouse.spark import get_spark
+from src.lakehouse.spark import get_spark, stop_spark
 from src.source_db.schema import SOURCE_TABLES, FULL_LOAD_TABLES
 
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
@@ -100,7 +100,7 @@ def load_table(spark, table):
     enrich = ENRICH.get(name)
     if enrich:
         changes = enrich(spark, changes)
-    changes = changes.cache()
+    changes = storage.cache(changes)
 
     # Data quality: critical checks stop the run, row rules quarantine
     run_id = uuid.uuid4().hex[:12]
@@ -137,7 +137,7 @@ def load_table(spark, table):
 
     record_batches(spark, name, new_batches)
     n = changes.count()
-    changes.unpersist()
+    storage.uncache(changes)
     return n
 
 
@@ -147,7 +147,7 @@ def main():
     for table in tables:
         n = load_table(spark, table)
         print(f"{table.name:<22} {n:>12,} rows processed")
-    spark.stop()
+    stop_spark(spark)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from pyspark.sql import functions as F
 
 from src.lakehouse import storage
-from src.lakehouse.spark import get_spark
+from src.lakehouse.spark import get_spark, stop_spark
 
 TRACKED = ["program_id", "status", "city", "state"]   # changes here create a new version
 OPEN_END = "9999-12-31"
@@ -455,7 +455,7 @@ def main():
         save(build(spark), name)
         print(f"{name:<30} {gold(spark, name).count():>10,} rows")
 
-    spark.stop()
+    stop_spark(spark)
 
 
 if __name__ == "__main__":

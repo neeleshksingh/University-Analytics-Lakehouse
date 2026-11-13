@@ -3,7 +3,7 @@ import os
 from pyspark.sql import functions as F
 
 from src.lakehouse import storage
-from src.lakehouse.spark import get_spark
+from src.lakehouse.spark import get_spark, stop_spark
 from src.source_db.schema import SOURCE_TABLES
 
 
@@ -42,7 +42,7 @@ def main():
     for table in SOURCE_TABLES:
         n = load_table(spark, str(table.name))
         print(f"{table.name:<22} {n:>12,} new rows")
-    spark.stop()
+    stop_spark(spark)
 
 
 if __name__ == "__main__":
