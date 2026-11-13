@@ -1,10 +1,9 @@
-from delta.tables import DeltaTable
 from pyspark.sql import functions as F
 
-from src.lakehouse.config import SILVER, GOLD
+from src.lakehouse import storage
 from src.lakehouse.spark import get_spark
 
-TRACKED = ["program_id", "status", "city", "state"]
+TRACKED = ["program_id", "status", "city", "state"]   # changes here create a new version
 OPEN_END = "9999-12-31"
 STUDENT_COLUMNS = ["student_sk", "student_id", "roll_no", "full_name", "gender", "admission_year",
                    "program_id", "city", "state", "status",
@@ -15,14 +14,17 @@ STUDENT_COLUMNS = ["student_sk", "student_id", "roll_no", "full_name", "gender",
 
 def silver(spark, name):
     """Read a Silver table, without soft-deleted rows."""
-    df = spark.read.format("delta").load(f"{SILVER}/{name}")
-    return df.filter(~F.col("is_deleted"))
+    return storage.read(spark, "silver", name).filter(~F.col("is_deleted"))
+
+
+def gold(spark, name):
+    """Read a Gold table."""
+    return storage.read(spark, "gold", name)
 
 
 def save(df, name):
     """Gold tables are rebuilt from Silver, so overwrite (including schema changes)."""
-    (df.write.format("delta").mode("overwrite")
-       .option("overwriteSchema", "true").save(f"{GOLD}/{name}"))
+    storage.write(df, "gold", name, mode="overwrite", overwrite_schema=True)
 
 
 def departments(spark):
@@ -100,9 +102,13 @@ def build_dim_term(spark):
         "start_date", "end_date", "academic_year",
     )
 
+
 def build_dim_fee_component(spark):
     return silver(spark, "fee_component").select(
-        "fee_component_id", F.col("code").alias("fee_code"), F.col("name").alias("fee_name"), "is_refundable"
+        "fee_component_id",
+        F.col("code").alias("fee_code"),
+        F.col("name").alias("fee_name"),
+        "is_refundable",
     )
 
 
@@ -139,15 +145,15 @@ def with_scd_columns(df):
 
 
 def build_dim_student(spark):
-    path = f"{GOLD}/dim_student"
     incoming = student_snapshot(spark)
 
-    if not DeltaTable.isDeltaTable(spark, path):
+    # First run: no history yet, so the first version is valid "forever back"
+    if not storage.exists(spark, "gold", "dim_student"):
         first = incoming.withColumn("valid_from", F.lit("1900-01-01").cast("timestamp"))
-        with_scd_columns(first).select(STUDENT_COLUMNS).write.format("delta").save(path)
+        storage.write(with_scd_columns(first).select(STUDENT_COLUMNS), "gold", "dim_student")
         return
 
-    current = (spark.read.format("delta").load(path)
+    current = (gold(spark, "dim_student")
                .filter("is_current")
                .select("student_id", F.col("row_hash").alias("old_hash")))
 
@@ -159,12 +165,12 @@ def build_dim_student(spark):
 
     no_key = F.lit(None).cast("int")
     staged = with_scd_columns(
-        changed.withColumn("merge_key", F.col("student_id"))
-        .unionByName(changed.withColumn("merge_key", no_key))
-        .unionByName(new.withColumn("merge_key", no_key))
+        changed.withColumn("merge_key", F.col("student_id"))          # copy A: closes the old row
+        .unionByName(changed.withColumn("merge_key", no_key))         # copy B: inserted as new version
+        .unionByName(new.withColumn("merge_key", no_key))             # brand-new students
     )
 
-    (DeltaTable.forPath(spark, path).alias("t")
+    (storage.delta_table(spark, "gold", "dim_student").alias("t")
         .merge(staged.alias("s"), "t.student_id = s.merge_key AND t.is_current = true")
         .whenMatchedUpdate(set={
             "is_current": "false",
@@ -177,7 +183,7 @@ def build_dim_student(spark):
 def attach_student_sk(spark, df, at_col):
     """Add student_sk: the dim_student version valid at the timestamp in `at_col`.
     df must have student_id. Returns df plus student_sk."""
-    students = (spark.read.format("delta").load(f"{GOLD}/dim_student")
+    students = (gold(spark, "dim_student")
                 .select("student_sk",
                         F.col("student_id").alias("dim_student_id"),
                         "valid_from", "valid_to"))
@@ -268,6 +274,7 @@ def build_fact_payment(spark):
         F.datediff(F.col("paid_at"), F.col("due_date")).alias("days_after_due"),
     )
 
+
 def build_fact_fee_invoice(spark):
     """Grain: one row per invoice."""
     # fee_invoice --enrollment_id--> enrollment
@@ -298,14 +305,11 @@ FACTS = {
     "fact_fee_invoice": build_fact_fee_invoice,
 }
 
+
 # ---------------------------------------------------------------- marts
 
 ELIGIBILITY_THRESHOLD = 75.0
 EXCUSED_COUNTS_AS_PRESENT = True
-
-
-def gold(spark, name):
-    return spark.read.format("delta").load(f"{GOLD}/{name}")
 
 
 def build_mart_attendance_eligibility(spark):
@@ -351,7 +355,8 @@ def build_mart_attendance_eligibility(spark):
         "student_id", "offering_id", "course_id", "term_id",
     )
 
-AGING_BUCKETS = [(0, "not_due"), (30, "1-30"), (60, "31-60"), (90, "61-90")]
+
+AGING_BUCKETS = [(0, "not_due"), (30, "1-30"), (60, "31-60"), (90, "61-90")]   # anything above: "90+"
 
 
 def build_mart_fee_aging(spark):
@@ -367,7 +372,6 @@ def build_mart_fee_aging(spark):
           .withColumn("amount_paid", F.coalesce(F.col("amount_paid"), F.lit(0))))
 
     df = df.withColumn("outstanding", F.col("amount_due") - F.col("amount_paid")).filter(F.col("outstanding") > 0)
-
     df = df.withColumn("days_overdue", F.datediff(F.lit(as_of), "due_date"))
 
     bucket = F.lit("90+")
@@ -394,9 +398,9 @@ def build_mart_fee_aging(spark):
         "invoice_id", "student_id", "term_id", "fee_component_id",
     )
 
+
 def build_mart_course_results(spark):
     """Grain: one row per term x course x exam type."""
-
     per_course = (gold(spark, "fact_exam_result")
                   .groupBy("term_id", "course_id", "exam_type")
                   .agg(
@@ -423,11 +427,13 @@ def build_mart_course_results(spark):
         "term_id", "course_id",
     )
 
+
 MARTS = {
     "mart_attendance_eligibility": build_mart_attendance_eligibility,
     "mart_fee_aging": build_mart_fee_aging,
     "mart_course_results": build_mart_course_results,
 }
+
 
 # ---------------------------------------------------------------- run
 
@@ -435,19 +441,19 @@ def main():
     spark = get_spark("gold")
     for name, build in DIMENSIONS.items():
         save(build(spark), name)
-        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        print(f"{name:<30} {gold(spark, name).count():>10,} rows")
 
     build_dim_student(spark)
-    dim = spark.read.format("delta").load(f"{GOLD}/dim_student")
+    dim = gold(spark, "dim_student")
     print(f"{'dim_student':<30} {dim.count():>10,} rows ({dim.filter('is_current').count():,} current)")
 
     for name, build in FACTS.items():
         save(build(spark), name)
-        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        print(f"{name:<30} {gold(spark, name).count():>10,} rows")
 
     for name, build in MARTS.items():
         save(build(spark), name)
-        print(f"{name:<30} {spark.read.format('delta').load(f'{GOLD}/{name}').count():>10,} rows")
+        print(f"{name:<30} {gold(spark, name).count():>10,} rows")
 
     spark.stop()
 

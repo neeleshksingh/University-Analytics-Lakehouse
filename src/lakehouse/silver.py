@@ -1,18 +1,12 @@
 import uuid
+
 from pyspark.sql import Window
 from pyspark.sql import functions as F
 
-from src.lakehouse.config import BRONZE, SILVER
-from src.lakehouse.spark import get_spark
-from src.source_db.schema import SOURCE_TABLES
-
-from delta.tables import DeltaTable
-from src.lakehouse.config import OPS
-from src.lakehouse.dq import apply_rules
-
+from src.lakehouse import storage
 from src.lakehouse.dq import apply_rules, critical_checks, CriticalCheckFailed
+from src.lakehouse.spark import get_spark
 from src.source_db.schema import SOURCE_TABLES, FULL_LOAD_TABLES
-
 
 AUDIT_COLUMNS = ["_batch_id", "_ingest_date", "_ingested_at", "_source_file"]
 
@@ -21,12 +15,12 @@ STANDARDIZE = {
     "faculty": {"email": F.lower},
 }
 
-PROGRESS = f"{OPS}/silver_progress"
 
 def standardize(df, table_name):
     for column, rule in STANDARDIZE.get(table_name, {}).items():
         df = df.withColumn(column, rule(F.col(column)))
     return df
+
 
 def latest_rows(df, key):
     """Keep only the newest version of each record."""
@@ -35,8 +29,7 @@ def latest_rows(df, key):
     )
     df = df.withColumn("_rn", F.row_number().over(newest_first))
     df = df.filter(F.col("_rn") == 1)
-    df = df.drop("_rn")
-    return df
+    return df.drop("_rn")
 
 
 def clean_text(df):
@@ -49,9 +42,9 @@ def clean_text(df):
 
 def processed_batches(spark, table_name):
     """Bronze batches Silver has already merged for this table."""
-    if not DeltaTable.isDeltaTable(spark, PROGRESS):
+    if not storage.exists(spark, "ops", "silver_progress"):
         return set()
-    rows = (spark.read.format("delta").load(PROGRESS)
+    rows = (storage.read(spark, "ops", "silver_progress")
             .filter(F.col("table_name") == table_name)
             .select("batch_id").collect())
     return {row["batch_id"] for row in rows}
@@ -60,9 +53,9 @@ def processed_batches(spark, table_name):
 def record_batches(spark, table_name, batch_ids):
     """Remember these batches as done. Called only after a successful MERGE."""
     rows = [(str(table_name), str(b)) for b in batch_ids]
-    (spark.createDataFrame(rows, "table_name string, batch_id string")
-        .withColumn("processed_at", F.current_timestamp())
-        .write.format("delta").mode("append").save(PROGRESS))
+    progress = (spark.createDataFrame(rows, "table_name string, batch_id string")
+                .withColumn("processed_at", F.current_timestamp()))
+    storage.write(progress, "ops", "silver_progress")
 
 
 def prepare(df, key, table_name):
@@ -73,29 +66,28 @@ def prepare(df, key, table_name):
     df = df.drop(*AUDIT_COLUMNS)
     return df.withColumn("_silver_updated_at", F.current_timestamp())
 
+
 def add_registration_flag(spark, df):
     """Mark each attendance row: is the student registered in this class's course offering?"""
-    sessions = spark.read.format("delta").load(f"{SILVER}/class_session").select("session_id", "offering_id")
+    sessions = storage.read(spark, "silver", "class_session").select("session_id", "offering_id")
     registrations = (
-        spark.read.format("delta").load(f"{SILVER}/course_registration")
+        storage.read(spark, "silver", "course_registration")
         .select("student_id", "offering_id").distinct()
         .withColumn("_dq_is_registered", F.lit(True))
     )
-
     df = df.join(sessions, on="session_id", how="left")
     df = df.join(registrations, on=["student_id", "offering_id"], how="left")
     df = df.withColumn("_dq_is_registered", F.coalesce(F.col("_dq_is_registered"), F.lit(False)))
-    df = df.drop("offering_id")
-    return df
+    return df.drop("offering_id")
 
 
 ENRICH = {"attendance": add_registration_flag}
 
+
 def load_table(spark, table):
-    name = str(table.name)   
+    name = str(table.name)
     key = str(list(table.primary_key.columns)[0].name)
-    path = f"{SILVER}/{name}"
-    bronze = spark.read.format("delta").load(f"{BRONZE}/{name}")
+    bronze = storage.read(spark, "bronze", name)
 
     done = processed_batches(spark, name)
     new_batches = [r["_batch_id"] for r in bronze.select("_batch_id").distinct().collect()
@@ -110,12 +102,12 @@ def load_table(spark, table):
         changes = enrich(spark, changes)
     changes = changes.cache()
 
-    # Apply data quality rules
+    # Data quality: critical checks stop the run, row rules quarantine
     run_id = uuid.uuid4().hex[:12]
 
     previous = None
-    if name in FULL_LOAD_TABLES and DeltaTable.isDeltaTable(spark, path):   # see note below
-        previous = spark.read.format("delta").load(path).count()
+    if name in FULL_LOAD_TABLES and storage.exists(spark, "silver", name):
+        previous = storage.read(spark, "silver", name).count()
 
     critical_results, failures = critical_checks(changes, name, key, run_id, previous)
     changes, quarantine, results = apply_rules(changes, name, key, run_id)
@@ -124,32 +116,28 @@ def load_table(spark, table):
     changes = changes.drop(*[c for c in changes.columns if c.startswith("_dq_")])
 
     if quarantine is not None:
-        quarantine.write.format("delta").mode("append").save(f"{OPS}/quarantine")
+        storage.write(quarantine, "ops", "quarantine")
     if results:
-        (spark.createDataFrame(results, "run_id string, table_name string, rule string, severity string, "
-                                        "rows_checked long, rows_failed long")
-              .withColumn("checked_at", F.current_timestamp())
-              .write.format("delta").mode("append").save(f"{OPS}/dq_results"))
+        scorecard = (spark.createDataFrame(results, "run_id string, table_name string, rule string, "
+                                                    "severity string, rows_checked long, rows_failed long")
+                     .withColumn("checked_at", F.current_timestamp()))
+        storage.write(scorecard, "ops", "dq_results")
 
     if failures:
         raise CriticalCheckFailed("; ".join(failures))
 
-    if not DeltaTable.isDeltaTable(spark, path):
-        # First run: the table doesn't exist yet, so create it
-        changes.write.format("delta").save(path)
+    if not storage.exists(spark, "silver", name):
+        storage.write(changes, "silver", name)
     else:
-        target = DeltaTable.forPath(spark, path)
-        (
-            target.alias("t")
+        (storage.delta_table(spark, "silver", name).alias("t")
             .merge(changes.alias("s"), f"t.{key} = s.{key}")
             .whenMatchedUpdateAll(condition="s.updated_at > t.updated_at")
             .whenNotMatchedInsertAll()
-            .execute()
-        )
+            .execute())
 
     record_batches(spark, name, new_batches)
-    n = changes.count()     
-    changes.unpersist()    
+    n = changes.count()
+    changes.unpersist()
     return n
 
 
