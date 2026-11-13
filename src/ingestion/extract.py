@@ -21,6 +21,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from sqlalchemy import BigInteger, Boolean, Date, DateTime, Integer, Numeric, SmallInteger, String
 
+import sys
+
 LAKE = Path("lake/landing")
 CHUNK_ROWS = 200_000
 
@@ -42,7 +44,7 @@ def build_query(table, control, upper_bound):
             watermark_col > control.last_watermark,
             watermark_col <= upper_bound,
         )
-        pass
+
     return query
 
 def arrow_schema(table):
@@ -83,7 +85,6 @@ def extract_table(conn, table, query, batch_id, run_date):
         rows_written += len(chunk)
         if os.environ.get("FAIL_TABLE") == table.name:          # test switch: simulate a crash
             raise RuntimeError(f"simulated failure after writing part {part}")
-        pass
 
     return rows_written
 
@@ -96,7 +97,6 @@ def record_run(engine, table_name, status, rows, new_watermark=None):
         values["last_watermark"] = new_watermark
     with engine.begin() as conn:
         conn.execute(update(ctl).where(ctl.c.source_table == table_name).values(**values))
-        pass
 
 
 def main():
@@ -113,6 +113,8 @@ def main():
 
     with engine.connect() as conn:
         controls = read_control_rows(conn)
+
+    failed = []
 
     for control in controls:
         table = s.metadata.tables[control.source_table]
@@ -134,11 +136,16 @@ def main():
                 n = extract_table(conn, table, query, batch_id, run_date)
             except Exception as error:
                 record_run(engine, table.name, "failed", 0)     # Rule 2: watermark NOT moved
+                failed.append(table.name)
                 print(f"{table.name:<22} FAILED: {error}")
                 continue
 
         record_run(engine, table.name, "success", n, new_watermark=upper_bound)  # Rule 2: only after success
         print(f"{table.name:<22} copied {n:,} rows")
+
+    if failed:
+        print(f"\nExtract failed for: {', '.join(failed)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
