@@ -16,6 +16,7 @@ STEPS = [
     ("bronze",  ["-m", "src.lakehouse.bronze"]),
     ("silver",  ["-m", "src.lakehouse.silver"]),
     ("gold",    ["-m", "src.lakehouse.gold"]),
+    ("export",  ["-m", "src.lakehouse.export"]),
 ]
 
 
