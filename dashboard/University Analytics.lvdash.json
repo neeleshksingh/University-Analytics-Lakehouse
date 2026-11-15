@@ -21,7 +21,7 @@
       "name": "a7c31e02",
       "displayName": "at_risk_students",
       "queryLines": [
-        "SELECT term_name, program_name, course_code, roll_no, full_name, student_status,\n",
+        "SELECT term_name, program_name, course_code, roll_no, full_name,\n",
         "       sessions_attended, sessions_held, attendance_pct\n",
         "FROM workspace.uni_gold.mart_attendance_eligibility\n",
         "WHERE eligibility_status = 'at_risk'\n",
@@ -52,7 +52,7 @@
       "queryLines": [
         "SELECT roll_no, full_name, fee_name, term_name, due_date, outstanding, days_overdue, aging_bucket, student_status\n",
         "FROM workspace.uni_gold.mart_fee_aging\n",
-        "ORDER BY outstanding DESC, days_overdue DESC\n",
+        "ORDER BY days_overdue DESC, outstanding DESC\n",
         "LIMIT 20"
       ]
     },
@@ -253,19 +253,6 @@
                   ],
                   "disaggregated": false
                 }
-              },
-              {
-                "name": "p1_f_status_a7c31e02",
-                "query": {
-                  "datasetName": "a7c31e02",
-                  "fields": [
-                    {
-                      "name": "student_status",
-                      "expression": "`student_status`"
-                    }
-                  ],
-                  "disaggregated": false
-                }
               }
             ],
             "spec": {
@@ -284,11 +271,6 @@
                     "fieldName": "student_status",
                     "displayName": "student_status",
                     "queryName": "p1_f_status_15ec4092"
-                  },
-                  {
-                    "fieldName": "student_status",
-                    "displayName": "student_status",
-                    "queryName": "p1_f_status_a7c31e02"
                   }
                 ]
               }
@@ -704,10 +686,6 @@
                       "expression": "`full_name`"
                     },
                     {
-                      "name": "student_status",
-                      "expression": "`student_status`"
-                    },
-                    {
                       "name": "sessions_attended",
                       "expression": "`sessions_attended`"
                     },
@@ -850,33 +828,6 @@
                     "title": "Name",
                     "visible": true,
                     "order": 100004,
-                    "booleanValues": [
-                      "false",
-                      "true"
-                    ],
-                    "imageUrlTemplate": "{{ @ }}",
-                    "imageTitleTemplate": "{{ @ }}",
-                    "imageWidth": "",
-                    "imageHeight": "",
-                    "linkUrlTemplate": "{{ @ }}",
-                    "linkTextTemplate": "{{ @ }}",
-                    "linkTitleTemplate": "{{ @ }}",
-                    "linkOpenInNewTab": true,
-                    "allowSearch": false,
-                    "allowHTML": false,
-                    "highlightLinks": false,
-                    "useMonospaceFont": false,
-                    "preserveWhitespace": false,
-                    "type": "string",
-                    "displayAs": "string",
-                    "alignContent": "left"
-                  },
-                  {
-                    "fieldName": "student_status",
-                    "displayName": "student_status",
-                    "title": "Status",
-                    "visible": true,
-                    "order": 100005,
                     "booleanValues": [
                       "false",
                       "true"
@@ -1289,7 +1240,7 @@
           "position": {
             "x": 0,
             "y": 4,
-            "width": 3,
+            "width": 4,
             "height": 4
           }
         },
@@ -1333,9 +1284,9 @@
             }
           },
           "position": {
-            "x": 3,
+            "x": 4,
             "y": 4,
-            "width": 3,
+            "width": 4,
             "height": 4
           }
         },
@@ -1379,9 +1330,9 @@
             }
           },
           "position": {
-            "x": 6,
+            "x": 8,
             "y": 4,
-            "width": 3,
+            "width": 4,
             "height": 4
           }
         },
@@ -1426,9 +1377,9 @@
           },
           "position": {
             "x": 9,
-            "y": 4,
+            "y": 2,
             "width": 3,
-            "height": 4
+            "height": 2
           }
         },
         {
@@ -1609,7 +1560,7 @@
               "frame": {
                 "showTitle": true,
                 "title": {
-                  "value": "Largest overdue invoices (top 20)",
+                  "value": "Oldest unpaid invoices (top 20)",
                   "fields": []
                 }
               },
