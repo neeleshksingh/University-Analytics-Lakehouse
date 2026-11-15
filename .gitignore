@@ -65,3 +65,9 @@ override.tf.json
 .DS_Store
 *.swp
 *.log
+
+
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
