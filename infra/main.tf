@@ -91,3 +91,31 @@ resource "azurerm_role_assignment" "adf_kv_reader" {
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_data_factory.main.identity[0].principal_id
 }
+
+resource "azurerm_databricks_workspace" "main" {
+  name                        = "dbw-${var.project}-${var.environment}"
+  location                    = azurerm_resource_group.main.location
+  resource_group_name         = azurerm_resource_group.main.name
+  sku                         = "premium"
+  managed_resource_group_name = "rg-${var.project}-dbx-managed-${var.environment}"
+
+  tags = local.tags
+}
+
+resource "azurerm_databricks_access_connector" "main" {
+  name                = "dbac-${var.project}-${var.environment}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = local.tags
+}
+
+resource "azurerm_role_assignment" "dbx_lake_writer" {
+  scope                = azurerm_storage_account.lake.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_databricks_access_connector.main.identity[0].principal_id
+}
