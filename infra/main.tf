@@ -33,7 +33,7 @@ resource "azurerm_storage_account" "lake" {
   min_tls_version                 = "TLS1_2"
   allow_nested_items_to_be_public = false
 
-  tags = azurerm_resource_group.main.tags
+  tags = local.tags
 }
 
 resource "azurerm_storage_container" "layer" {
@@ -42,4 +42,27 @@ resource "azurerm_storage_container" "layer" {
   name                  = each.value
   storage_account_id    = azurerm_storage_account.lake.id
   container_access_type = "private"
+}
+
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_key_vault" "main" {
+  name                = "kv-${var.project}-${random_string.suffix.result}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+
+  rbac_authorization_enabled = true
+  soft_delete_retention_days = 7
+  purge_protection_enabled   = false
+
+  tags = local.tags
+}
+
+resource "azurerm_role_assignment" "kv_secrets_me" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets Officer"
+  principal_id         = data.azurerm_client_config.current.object_id
 }
