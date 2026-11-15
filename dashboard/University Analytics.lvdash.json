@@ -1,0 +1,2723 @@
+{
+  "datasets": [
+    {
+      "name": "15ec4092",
+      "displayName": "eligibility",
+      "queryLines": [
+        "SELECT\n",
+        "  academic_year, term_name, start_date, program_name, course_code, course_title,\n",
+        "  roll_no, full_name, student_status,\n",
+        "  sessions_held, sessions_attended, attendance_pct,\n",
+        "  eligibility_status,\n",
+        "  CASE WHEN is_eligible THEN 0 ELSE 1 END                        AS below_75,\n",
+        "  CASE WHEN is_eligible THEN 0 ELSE 100 END                      AS below_75_pct,\n",
+        "  CASE WHEN eligibility_status = 'at_risk' THEN 1 ELSE 0 END      AS is_at_risk,\n",
+        "  CASE WHEN eligibility_status = 'not_eligible' THEN 1 ELSE 0 END AS is_not_eligible,\n",
+        "  concat(date_format(start_date, 'yyyy-MM'), ' ', term_name)     AS term_sort\n",
+        "FROM workspace.uni_gold.mart_attendance_eligibility"
+      ]
+    },
+    {
+      "name": "a7c31e02",
+      "displayName": "at_risk_students",
+      "queryLines": [
+        "SELECT term_name, program_name, course_code, roll_no, full_name, student_status,\n",
+        "       sessions_attended, sessions_held, attendance_pct\n",
+        "FROM workspace.uni_gold.mart_attendance_eligibility\n",
+        "WHERE eligibility_status = 'at_risk'\n",
+        "  AND student_status = 'active'\n",
+        "ORDER BY attendance_pct\n",
+        "LIMIT 500"
+      ]
+    },
+    {
+      "name": "b2f60d19",
+      "displayName": "fee_aging",
+      "queryLines": [
+        "SELECT *,\n",
+        "  CASE aging_bucket\n",
+        "    WHEN 'not_due' THEN 0 WHEN '1-30' THEN 1 WHEN '31-60' THEN 2\n",
+        "    WHEN '61-90' THEN 3 ELSE 4\n",
+        "  END                                                                AS bucket_order,\n",
+        "  concat(CASE aging_bucket WHEN 'not_due' THEN '0' WHEN '1-30' THEN '1' WHEN '31-60' THEN '2'\n",
+        "                           WHEN '61-90' THEN '3' ELSE '4' END, ' · ', aging_bucket) AS bucket,\n",
+        "  outstanding / 1e7                                                  AS outstanding_cr,\n",
+        "  CASE WHEN aging_bucket = '90+' THEN outstanding / 1e7 ELSE 0 END   AS outstanding_90_cr\n",
+        "FROM workspace.uni_gold.mart_fee_aging"
+      ]
+    },
+    {
+      "name": "c94e7a55",
+      "displayName": "top_overdue",
+      "queryLines": [
+        "SELECT roll_no, full_name, fee_name, term_name, due_date, outstanding, days_overdue, aging_bucket, student_status\n",
+        "FROM workspace.uni_gold.mart_fee_aging\n",
+        "ORDER BY outstanding DESC, days_overdue DESC\n",
+        "LIMIT 20"
+      ]
+    },
+    {
+      "name": "d03b8c41",
+      "displayName": "course_results",
+      "queryLines": [
+        "SELECT *,\n",
+        "  CASE WHEN exam_type = 'endterm' THEN pass_rate_pct END       AS endterm_pass_rate,\n",
+        "  CASE WHEN exam_type = 'supplementary' THEN pass_rate_pct END AS supplementary_pass_rate,\n",
+        "  CASE WHEN exam_type = 'endterm' THEN avg_score_pct END       AS endterm_avg_score\n",
+        "FROM workspace.uni_gold.mart_course_results"
+      ]
+    },
+    {
+      "name": "e5a1f9c7",
+      "displayName": "lowest_endterm",
+      "queryLines": [
+        "SELECT term_name, department_name, course_code, course_title, appeared, absent, pass_rate_pct, avg_score_pct\n",
+        "FROM workspace.uni_gold.mart_course_results\n",
+        "WHERE exam_type = 'endterm'\n",
+        "ORDER BY pass_rate_pct\n",
+        "LIMIT 10"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "9abdb692",
+      "displayName": "Attendance",
+      "layout": [
+        {
+          "widget": {
+            "name": "p1_title",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "# Attendance eligibility\n",
+                    "\n",
+                    "Which students are below the 75% attendance needed to sit the end-term exam, and where is it concentrated?"
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_f_term",
+            "queries": [
+              {
+                "name": "p1_f_term_15ec4092",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p1_f_term_a7c31e02",
+                "query": {
+                  "datasetName": "a7c31e02",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Term",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p1_f_term_15ec4092"
+                  },
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p1_f_term_a7c31e02"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_f_program",
+            "queries": [
+              {
+                "name": "p1_f_program_15ec4092",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "program_name",
+                      "expression": "`program_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p1_f_program_a7c31e02",
+                "query": {
+                  "datasetName": "a7c31e02",
+                  "fields": [
+                    {
+                      "name": "program_name",
+                      "expression": "`program_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Program",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "program_name",
+                    "displayName": "program_name",
+                    "queryName": "p1_f_program_15ec4092"
+                  },
+                  {
+                    "fieldName": "program_name",
+                    "displayName": "program_name",
+                    "queryName": "p1_f_program_a7c31e02"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_f_status",
+            "queries": [
+              {
+                "name": "p1_f_status_15ec4092",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p1_f_status_a7c31e02",
+                "query": {
+                  "datasetName": "a7c31e02",
+                  "fields": [
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Student status",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "student_status",
+                    "displayName": "student_status",
+                    "queryName": "p1_f_status_15ec4092"
+                  },
+                  {
+                    "fieldName": "student_status",
+                    "displayName": "student_status",
+                    "queryName": "p1_f_status_a7c31e02"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_records",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Student-course records",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_below75",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "avg(below_75_pct)",
+                      "expression": "AVG(`below_75_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Below 75% (%)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(below_75_pct)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_atrisk",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "sum(is_at_risk)",
+                      "expression": "SUM(`is_at_risk`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "At risk this term",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_at_risk)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_noteligible",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "sum(is_not_eligible)",
+                      "expression": "SUM(`is_not_eligible`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Not eligible (final)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(is_not_eligible)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_status",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "eligibility_status",
+                      "expression": "`eligibility_status`"
+                    },
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Eligibility status",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "eligibility_status",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Eligibility status"
+                },
+                "y": {
+                  "fieldName": "count(*)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Records"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_bystatus",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    },
+                    {
+                      "name": "avg(below_75_pct)",
+                      "expression": "AVG(`below_75_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Below 75% by student status (%)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "student_status",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Student status"
+                },
+                "y": {
+                  "fieldName": "avg(below_75_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Below 75% (%)"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_byterm",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "15ec4092",
+                  "fields": [
+                    {
+                      "name": "term_sort",
+                      "expression": "`term_sort`"
+                    },
+                    {
+                      "name": "avg(below_75_pct)",
+                      "expression": "AVG(`below_75_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Below 75% by term (%) — the latest term is still running",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "term_sort",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "natural-order"
+                    }
+                  },
+                  "displayName": "Term"
+                },
+                "y": {
+                  "fieldName": "avg(below_75_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Below 75% (%)"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_atrisk_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a7c31e02",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    },
+                    {
+                      "name": "program_name",
+                      "expression": "`program_name`"
+                    },
+                    {
+                      "name": "course_code",
+                      "expression": "`course_code`"
+                    },
+                    {
+                      "name": "roll_no",
+                      "expression": "`roll_no`"
+                    },
+                    {
+                      "name": "full_name",
+                      "expression": "`full_name`"
+                    },
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    },
+                    {
+                      "name": "sessions_attended",
+                      "expression": "`sessions_attended`"
+                    },
+                    {
+                      "name": "sessions_held",
+                      "expression": "`sessions_held`"
+                    },
+                    {
+                      "name": "attendance_pct",
+                      "expression": "`attendance_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "At risk this term — can still reach 75% (lowest first)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "title": "Term",
+                    "visible": true,
+                    "order": 100000,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "program_name",
+                    "displayName": "program_name",
+                    "title": "Program",
+                    "visible": true,
+                    "order": 100001,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "course_code",
+                    "displayName": "course_code",
+                    "title": "Course",
+                    "visible": true,
+                    "order": 100002,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "roll_no",
+                    "displayName": "roll_no",
+                    "title": "Roll no",
+                    "visible": true,
+                    "order": 100003,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "full_name",
+                    "displayName": "full_name",
+                    "title": "Name",
+                    "visible": true,
+                    "order": 100004,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "student_status",
+                    "displayName": "student_status",
+                    "title": "Status",
+                    "visible": true,
+                    "order": 100005,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "sessions_attended",
+                    "displayName": "sessions_attended",
+                    "title": "Attended",
+                    "visible": true,
+                    "order": 100006,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "numberFormat": "0",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "sessions_held",
+                    "displayName": "sessions_held",
+                    "title": "Held",
+                    "visible": true,
+                    "order": 100007,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "numberFormat": "0",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "attendance_pct",
+                    "displayName": "attendance_pct",
+                    "title": "Attendance %",
+                    "visible": true,
+                    "order": 100008,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "float",
+                    "displayAs": "number",
+                    "numberFormat": "0.00",
+                    "alignContent": "right"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 20,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "p1_notes",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "**Checks:** records = 121,275 · below 75% ≈ 22 · at risk + not eligible ≈ 22% of records · excluding *dropped* lowers the percentage."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 28,
+            "width": 12,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "4c2e8f10",
+      "displayName": "Fee aging",
+      "layout": [
+        {
+          "widget": {
+            "name": "p2_title",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "# Fee aging\n",
+                    "\n",
+                    "How much fee money is owed, by whom, and for how long? Aged as of the latest date in the data, not today."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_f_term",
+            "queries": [
+              {
+                "name": "p2_f_term_b2f60d19",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p2_f_term_c94e7a55",
+                "query": {
+                  "datasetName": "c94e7a55",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Term",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p2_f_term_b2f60d19"
+                  },
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p2_f_term_c94e7a55"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_f_fee",
+            "queries": [
+              {
+                "name": "p2_f_fee_b2f60d19",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "fee_name",
+                      "expression": "`fee_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p2_f_fee_c94e7a55",
+                "query": {
+                  "datasetName": "c94e7a55",
+                  "fields": [
+                    {
+                      "name": "fee_name",
+                      "expression": "`fee_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Fee type",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "fee_name",
+                    "displayName": "fee_name",
+                    "queryName": "p2_f_fee_b2f60d19"
+                  },
+                  {
+                    "fieldName": "fee_name",
+                    "displayName": "fee_name",
+                    "queryName": "p2_f_fee_c94e7a55"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_f_status",
+            "queries": [
+              {
+                "name": "p2_f_status_b2f60d19",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p2_f_status_c94e7a55",
+                "query": {
+                  "datasetName": "c94e7a55",
+                  "fields": [
+                    {
+                      "name": "student_status",
+                      "expression": "`student_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Student status",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "student_status",
+                    "displayName": "student_status",
+                    "queryName": "p2_f_status_b2f60d19"
+                  },
+                  {
+                    "fieldName": "student_status",
+                    "displayName": "student_status",
+                    "queryName": "p2_f_status_c94e7a55"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_outstanding",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "sum(outstanding_cr)",
+                      "expression": "SUM(`outstanding_cr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Outstanding (₹ crore)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(outstanding_cr)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_invoices",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "count(*)",
+                      "expression": "COUNT(`*`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Invoices still owing",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(*)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_90",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "sum(outstanding_90_cr)",
+                      "expression": "SUM(`outstanding_90_cr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "90+ days overdue (₹ crore)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(outstanding_90_cr)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_asof",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "max(as_of_date)",
+                      "expression": "MAX(`as_of_date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "As of",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "max(as_of_date)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_buckets",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "bucket",
+                      "expression": "`bucket`"
+                    },
+                    {
+                      "name": "sum(outstanding_cr)",
+                      "expression": "SUM(`outstanding_cr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Outstanding by aging bucket (₹ crore) — fees bill once per term",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "bucket",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "natural-order"
+                    }
+                  },
+                  "displayName": "Aging bucket"
+                },
+                "y": {
+                  "fieldName": "sum(outstanding_cr)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "₹ crore"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_feetype",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "b2f60d19",
+                  "fields": [
+                    {
+                      "name": "fee_name",
+                      "expression": "`fee_name`"
+                    },
+                    {
+                      "name": "sum(outstanding_cr)",
+                      "expression": "SUM(`outstanding_cr`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Outstanding by fee type (₹ crore)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "fee_name",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Fee type"
+                },
+                "y": {
+                  "fieldName": "sum(outstanding_cr)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "₹ crore"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_top",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "c94e7a55",
+                  "fields": [
+                    {
+                      "name": "roll_no",
+                      "expression": "`roll_no`"
+                    },
+                    {
+                      "name": "full_name",
+                      "expression": "`full_name`"
+                    },
+                    {
+                      "name": "fee_name",
+                      "expression": "`fee_name`"
+                    },
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    },
+                    {
+                      "name": "due_date",
+                      "expression": "`due_date`"
+                    },
+                    {
+                      "name": "outstanding",
+                      "expression": "`outstanding`"
+                    },
+                    {
+                      "name": "days_overdue",
+                      "expression": "`days_overdue`"
+                    },
+                    {
+                      "name": "aging_bucket",
+                      "expression": "`aging_bucket`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Largest overdue invoices (top 20)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "roll_no",
+                    "displayName": "roll_no",
+                    "title": "Roll no",
+                    "visible": true,
+                    "order": 100000,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "full_name",
+                    "displayName": "full_name",
+                    "title": "Name",
+                    "visible": true,
+                    "order": 100001,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "fee_name",
+                    "displayName": "fee_name",
+                    "title": "Fee",
+                    "visible": true,
+                    "order": 100002,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "title": "Term",
+                    "visible": true,
+                    "order": 100003,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "due_date",
+                    "displayName": "due_date",
+                    "title": "Due date",
+                    "visible": true,
+                    "order": 100004,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "date",
+                    "displayAs": "datetime",
+                    "dateTimeFormat": "YYYY-MM-DD",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "outstanding",
+                    "displayName": "outstanding",
+                    "title": "Outstanding (₹)",
+                    "visible": true,
+                    "order": 100005,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "float",
+                    "displayAs": "number",
+                    "numberFormat": "0.00",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "days_overdue",
+                    "displayName": "days_overdue",
+                    "title": "Days overdue",
+                    "visible": true,
+                    "order": 100006,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "numberFormat": "0",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "aging_bucket",
+                    "displayName": "aging_bucket",
+                    "title": "Bucket",
+                    "visible": true,
+                    "order": 100007,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "p2_notes",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "**Checks:** SUM(outstanding) must equal the independent total from the Phase 4 check script on the same data · only the 61-90 and 90+ buckets fill."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 12,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "7d5b3a96",
+      "displayName": "Course results",
+      "layout": [
+        {
+          "widget": {
+            "name": "p3_title",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "# Course results\n",
+                    "\n",
+                    "How did each course perform, by term and exam type? Pass rate counts only students who appeared."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_f_term",
+            "queries": [
+              {
+                "name": "p3_f_term_d03b8c41",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p3_f_term_e5a1f9c7",
+                "query": {
+                  "datasetName": "e5a1f9c7",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Term",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p3_f_term_d03b8c41"
+                  },
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "queryName": "p3_f_term_e5a1f9c7"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_f_dept",
+            "queries": [
+              {
+                "name": "p3_f_dept_d03b8c41",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "department_name",
+                      "expression": "`department_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "p3_f_dept_e5a1f9c7",
+                "query": {
+                  "datasetName": "e5a1f9c7",
+                  "fields": [
+                    {
+                      "name": "department_name",
+                      "expression": "`department_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Department",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "department_name",
+                    "displayName": "department_name",
+                    "queryName": "p3_f_dept_d03b8c41"
+                  },
+                  {
+                    "fieldName": "department_name",
+                    "displayName": "department_name",
+                    "queryName": "p3_f_dept_e5a1f9c7"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_f_exam",
+            "queries": [
+              {
+                "name": "p3_f_exam_d03b8c41",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "exam_type",
+                      "expression": "`exam_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Exam type",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "exam_type",
+                    "displayName": "exam_type",
+                    "queryName": "p3_f_exam_d03b8c41"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_results",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "sum(students)",
+                      "expression": "SUM(`students`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Exam results",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(students)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_endpass",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "avg(endterm_pass_rate)",
+                      "expression": "AVG(`endterm_pass_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "End-term pass rate (%)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(endterm_pass_rate)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_supppass",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "avg(supplementary_pass_rate)",
+                      "expression": "AVG(`supplementary_pass_rate`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Supplementary pass rate (%)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(supplementary_pass_rate)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_endscore",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "avg(endterm_avg_score)",
+                      "expression": "AVG(`endterm_avg_score`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "End-term average score (%)",
+                  "fields": []
+                },
+                "contentAlignment": "left"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(endterm_avg_score)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 4,
+            "width": 3,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_pass",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "exam_type",
+                      "expression": "`exam_type`"
+                    },
+                    {
+                      "name": "avg(pass_rate_pct)",
+                      "expression": "AVG(`pass_rate_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Pass rate by exam type (%)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "exam_type",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Exam type"
+                },
+                "y": {
+                  "fieldName": "avg(pass_rate_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Pass rate (%)"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_score",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "d03b8c41",
+                  "fields": [
+                    {
+                      "name": "exam_type",
+                      "expression": "`exam_type`"
+                    },
+                    {
+                      "name": "avg(avg_score_pct)",
+                      "expression": "AVG(`avg_score_pct`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Average score by exam type (%) — absent students excluded",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "exam_type",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  },
+                  "displayName": "Exam type"
+                },
+                "y": {
+                  "fieldName": "avg(avg_score_pct)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Average score (%)"
+                },
+                "label": {
+                  "show": true
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_lowest",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "e5a1f9c7",
+                  "fields": [
+                    {
+                      "name": "term_name",
+                      "expression": "`term_name`"
+                    },
+                    {
+                      "name": "department_name",
+                      "expression": "`department_name`"
+                    },
+                    {
+                      "name": "course_code",
+                      "expression": "`course_code`"
+                    },
+                    {
+                      "name": "course_title",
+                      "expression": "`course_title`"
+                    },
+                    {
+                      "name": "appeared",
+                      "expression": "`appeared`"
+                    },
+                    {
+                      "name": "absent",
+                      "expression": "`absent`"
+                    },
+                    {
+                      "name": "pass_rate_pct",
+                      "expression": "`pass_rate_pct`"
+                    },
+                    {
+                      "name": "avg_score_pct",
+                      "expression": "`avg_score_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Lowest end-term pass rates (bottom 10)",
+                  "fields": []
+                }
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "term_name",
+                    "displayName": "term_name",
+                    "title": "Term",
+                    "visible": true,
+                    "order": 100000,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "department_name",
+                    "displayName": "department_name",
+                    "title": "Department",
+                    "visible": true,
+                    "order": 100001,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "course_code",
+                    "displayName": "course_code",
+                    "title": "Course",
+                    "visible": true,
+                    "order": 100002,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "course_title",
+                    "displayName": "course_title",
+                    "title": "Title",
+                    "visible": true,
+                    "order": 100003,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "string",
+                    "displayAs": "string",
+                    "alignContent": "left"
+                  },
+                  {
+                    "fieldName": "appeared",
+                    "displayName": "appeared",
+                    "title": "Appeared",
+                    "visible": true,
+                    "order": 100004,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "numberFormat": "0",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "absent",
+                    "displayName": "absent",
+                    "title": "Absent",
+                    "visible": true,
+                    "order": 100005,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "numberFormat": "0",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "pass_rate_pct",
+                    "displayName": "pass_rate_pct",
+                    "title": "Pass rate %",
+                    "visible": true,
+                    "order": 100006,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "float",
+                    "displayAs": "number",
+                    "numberFormat": "0.00",
+                    "alignContent": "right"
+                  },
+                  {
+                    "fieldName": "avg_score_pct",
+                    "displayName": "avg_score_pct",
+                    "title": "Avg score %",
+                    "visible": true,
+                    "order": 100007,
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "allowSearch": false,
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "type": "float",
+                    "displayAs": "number",
+                    "numberFormat": "0.00",
+                    "alignContent": "right"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 14,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "p3_notes",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "**Checks:** SUM(students) = 230,393 · supplementary has the lowest pass rate · averages treat each course equally."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 12,
+            "height": 1
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
