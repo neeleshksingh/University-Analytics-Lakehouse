@@ -66,3 +66,28 @@ resource "azurerm_role_assignment" "kv_secrets_me" {
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = data.azurerm_client_config.current.object_id
 }
+
+
+resource "azurerm_data_factory" "main" {
+  name                = "adf-${var.project}-${random_string.suffix.result}"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = local.tags
+}
+
+resource "azurerm_role_assignment" "adf_lake_writer" {
+  scope                = azurerm_storage_account.lake.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_data_factory.main.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "adf_kv_reader" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_data_factory.main.identity[0].principal_id
+}
