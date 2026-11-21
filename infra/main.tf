@@ -98,7 +98,9 @@ resource "azurerm_databricks_workspace" "main" {
   resource_group_name         = azurerm_resource_group.main.name
   sku                         = "premium"
   managed_resource_group_name = "rg-${var.project}-dbx-managed-${var.environment}"
-
+  custom_parameters {
+    no_public_ip = false
+  }
   tags = local.tags
 }
 
